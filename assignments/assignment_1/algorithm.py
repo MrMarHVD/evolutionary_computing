@@ -37,15 +37,28 @@ from tree_edit_distance import (
 )
 
 
-# 1. Experiment settings
+# 1. Settings
 HERE = Path(__file__).resolve().parent
 TARGET_DIR = HERE / "target_bodies"
 GENOTYPE_SIZE = 64
 NUM_CHROMOSOMES = 3
+INIT_MIN, INIT_MAX = -1.0, 1.0
 NUM_MODULES = 20
 # TODO: Set population size, generations, seeds, k values, and operator settings.
 # k counts distinct positions across all three chromosomes (192 genes total).
 
+# Constants
+POPULATION_SIZE = 1000 # TODO: determine the right size, use this for both initial population size and number of offspring per generation
+NUM_GENERATIONS = 100
+MUTATION_PROBABILITY = 1.0
+MUTATION_SD = 0.1
+TOURNAMENT_SIZE = 3
+CROSSOVER_PROBABILITY = 0.5
+SEEDS = list(range(5))
+
+
+# K-values to compare between the two conditions
+K = [10, 20]
 
 # 2. Load target body graphs
 # TODO: Load the target JSON files in sorted order.
