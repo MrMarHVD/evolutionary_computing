@@ -10,32 +10,18 @@ from pathlib import Path
 import networkx as nx
 import numpy as np
 import torch
+# Assignment fitness functions
+from tree_edit_distance import (distances_to_targets,
+                                mean_plus_std_tree_edit_distance)
 
 # ARIEL
-from ariel.body_phenotypes.robogen_lite.decoders._blueprint import (
-    load_graph_from_json,
-)
-from ariel.body_phenotypes.robogen_lite.decoders.hi_prob_decoding import (
-    HighProbabilityDecoder,
-)
-from ariel.ec import (
-    EA,
-    EAOperation,
-    FloatMutator,
-    FloatsGenerator,
-    Crossover,
-    Individual,
-    Population,
-    config,
-)
+from ariel.body_phenotypes.robogen_lite.decoders._blueprint import \
+    load_graph_from_json
+from ariel.body_phenotypes.robogen_lite.decoders.hi_prob_decoding import \
+    HighProbabilityDecoder
+from ariel.ec import (EA, Crossover, EAOperation, FloatMutator,
+                      FloatsGenerator, Individual, Population, config)
 from ariel.ec.genotypes.nde import NeuralDevelopmentalEncoding
-
-# Assignment fitness functions
-from tree_edit_distance import (
-    distances_to_targets,
-    mean_plus_std_tree_edit_distance,
-)
-
 
 # 1. Settings
 HERE = Path(__file__).resolve().parent
@@ -48,7 +34,7 @@ NUM_MODULES = 20
 # k counts distinct positions across all three chromosomes (192 genes total).
 
 # Constants
-POPULATION_SIZE = 1000 # TODO: determine the right size, use this for both initial population size and number of offspring per generation
+POPULATION_SIZE = 1000  # TODO: determine the right size, use this for both initial population size and number of offspring per generation
 NUM_GENERATIONS = 100
 MUTATION_PROBABILITY = 1.0
 MUTATION_SD = 0.1
@@ -60,8 +46,15 @@ SEEDS = list(range(5))
 # K-values to compare between the two conditions
 K = [10, 20]
 
-# 2. Load target body graphs
-# TODO: Load the target JSON files in sorted order.
+# Load target graphs from predefined target directory
+
+
+def get_targets() -> list[nx.DiGraph[int]]:
+    paths = sorted(TARGET_DIR.glob("*.json"))
+    if not paths:
+        raise FileNotFoundError(f"No graphs found in {TARGET_DIR}")
+
+    return [load_graph_from_json(path) for path in paths]
 
 
 # 3. Initialize the population and fixed NDE network
