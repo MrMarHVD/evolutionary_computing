@@ -6,8 +6,14 @@ import csv
 import json
 # Standard library
 import random
+import sys
 from pathlib import Path
 from typing import Any
+
+# Allow this file to be run directly from the assignment directory.
+ARIEL_SRC = Path(__file__).resolve().parents[2] / "src"
+if str(ARIEL_SRC) not in sys.path:
+    sys.path.insert(0, str(ARIEL_SRC))
 
 # Third-party libraries
 import networkx as nx
@@ -31,13 +37,13 @@ from ariel.ec.individual import JSONIterable
 # Settings and constants
 HERE = Path(__file__).resolve().parent
 TARGET_DIR = HERE / "target_bodies"
-RESULTS_DIR = HERE / "results"
+RESULTS_DIR = HERE / "results_100_2"
 GENOTYPE_SIZE = 64
 NUM_CHROMOSOMES = 3
 INIT_MIN, INIT_MAX = -1.0, 1.0
 NUM_MODULES = 20
 
-POPULATION_SIZE = 1000  # TODO: determine the right size, use this for both initial population size and number of offspring per generation
+POPULATION_SIZE = 100  # TODO: determine the right size, use this for both initial population size and number of offspring per generation
 NUM_GENERATIONS = 100
 MUTATION_PROBABILITY = 1.0
 MUTATION_SD = 0.1
@@ -184,9 +190,10 @@ def mutate_population(
     k: int,
     rng: np.random.Generator,
 ) -> Population:
-    """Apply the mutation-event to each offspring."""
+    """Apply mutation; k=0 is the baseline."""
+    mutation_probability = 0.0 if k == 0 else MUTATION_PROBABILITY
     for individual in offspring:
-        if rng.random() < MUTATION_PROBABILITY:
+        if rng.random() < mutation_probability:
             individual.genotype = mutate_k(individual.genotype, k, rng)
             individual.requires_eval = True
             individual.fitness_ = None
@@ -289,6 +296,7 @@ def save_run_results(
         "init_min": INIT_MIN,
         "init_max": INIT_MAX,
         "mutation_probability": MUTATION_PROBABILITY,
+        "condition_mutation_probability": 0.0 if k == 0 else MUTATION_PROBABILITY,
         "mutation_sd": MUTATION_SD,
         "tournament_size": TOURNAMENT_SIZE,
         "crossover_swap_probability": CROSSOVER_PROBABILITY,
@@ -353,12 +361,13 @@ def plot_results() -> None:
     """Compare saved conditions across SEEDS; require all configured runs."""
     from matplotlib.figure import Figure
 
-    convergence = Figure(figsize=(9, 6))
-    convergence_axis = convergence.subplots()
+    convergence = Figure(figsize=(10, 8))
+    average_axis, best_axis = convergence.subplots(2, 1, sharex=True)
     histogram = Figure(figsize=(9, 6))
     histogram_axis = histogram.subplots()
     summary: list[dict[str, Any]] = []
     final_by_k: dict[int, list[float]] = {}
+    overall_best: dict[str, Any] | None = None
     for k in K:
         histories = [
             json.loads(
@@ -366,40 +375,132 @@ def plot_results() -> None:
             )
             for seed in SEEDS
         ]
-        values = np.array([[row["best"] for row in rows] for rows in histories])
-        mean, std = values.mean(axis=0), values.std(axis=0)
-        (line,) = convergence_axis.plot(generations, mean, label=f"k={k}")
-        convergence_axis.fill_between(
-            generations, mean - std, mean + std, color=line.get_color(), alpha=0.15
+        average_values = np.array([[row["mean"] for row in rows] for rows in histories])
+        best_values = np.array([[row["best"] for row in rows] for rows in histories])
+        average_mean = average_values.mean(axis=0)
+        average_std = average_values.std(axis=0)
+        best_mean = best_values.mean(axis=0)
+        best_std = best_values.std(axis=0)
+        generations = [row["generation"] for row in histories[0]]
+        (average_line,) = average_axis.plot(generations, average_mean, label=f"k={k}")
+        average_axis.fill_between(
+            generations,
+            average_mean - average_std,
+            average_mean + average_std,
+            color=average_line.get_color(),
+            alpha=0.15,
         )
-        final_by_k[k] = values[:, -1].tolist()
+        (best_line,) = best_axis.plot(generations, best_mean, label=f"k={k}")
+        best_axis.fill_between(
+            generations,
+            best_mean - best_std,
+            best_mean + best_std,
+            color=best_line.get_color(),
+            alpha=0.15,
+        )
+        final_by_k[k] = best_values[:, -1].tolist()
+        average_fitness_by_generation = np.array(
+            [[row["mean"] for row in rows] for rows in histories]
+        ).mean(axis=0)
+        condition_histogram = Figure(figsize=(8, 5))
+        condition_axis = condition_histogram.subplots()
+        condition_axis.hist(
+            average_fitness_by_generation,
+            bins="auto",
+            edgecolor="black",
+        )
+        condition_axis.set(
+            xlabel="Average population fitness",
+            ylabel="Number of generations",
+            title=f"Average fitness across repeats (k={k})",
+        )
+        condition_histogram.savefig(
+            RESULTS_DIR / f"average_fitness_histogram_k_{k}.png",
+            bbox_inches="tight",
+        )
         summary.append(
             {
                 "k": k,
                 "runs": len(histories),
-                "mean_final_best": float(mean[-1]),
-                "std_final_best": float(std[-1]),
+                "mean_final_average": float(average_mean[-1]),
+                "std_final_average": float(average_std[-1]),
+                "mean_final_best": float(best_mean[-1]),
+                "std_final_best": float(best_std[-1]),
             }
         )
+        for seed in SEEDS:
+            best_path = RESULTS_DIR / f"seed_{seed}" / f"k_{k}" / "best.json"
+            candidate = json.loads(best_path.read_text())
+            if overall_best is None or candidate["fitness"] < overall_best["fitness"]:
+                overall_best = {
+                    "fitness": candidate["fitness"],
+                    "seed": seed,
+                    "k": k,
+                    "path": str(best_path),
+                    "genotype": candidate["genotype"],
+                    "distances_to_targets": candidate["distances_to_targets"],
+                }
     bins = np.histogram_bin_edges(
         [v for values in final_by_k.values() for v in values], bins="auto"
     )
     for k, values in final_by_k.items():
         histogram_axis.hist(values, bins=bins, histtype="step", label=f"k={k}")
-    convergence_axis.set(
-        xlabel="Generation", ylabel="Best fitness: mean ± standard deviation"
+    average_axis.set_ylabel("Average population fitness")
+    best_axis.set(xlabel="Generation", ylabel="Best population fitness")
+    average_axis.set_title(
+        "Fitness across generations (mean ± standard deviation across seeds)"
     )
+    average_axis.set_xlim(0, NUM_GENERATIONS)
+    average_axis.legend()
+    best_axis.set_xlim(0, NUM_GENERATIONS)
+    best_axis.legend()
     histogram_axis.set(xlabel="Final best fitness", ylabel="Number of repetitions")
-    convergence_axis.legend()
     histogram_axis.legend()
     convergence.savefig(RESULTS_DIR / "comparison_convergence.png", bbox_inches="tight")
     histogram.savefig(RESULTS_DIR / "comparison_histogram.png", bbox_inches="tight")
+
+    maximal_average = []
+    for k in K:
+        histories = [
+            json.loads(
+                (RESULTS_DIR / f"seed_{seed}" / f"k_{k}" / "history.json").read_text()
+            )
+            for seed in SEEDS
+        ]
+        mean_by_generation = np.array(
+            [[row["mean"] for row in rows] for rows in histories]
+        ).mean(axis=0)
+        maximal_average.append(float(mean_by_generation.max()))
+    maximum_figure = Figure(figsize=(8, 5))
+    maximum_axis = maximum_figure.subplots()
+    maximum_axis.bar([str(k) for k in K], maximal_average)
+    maximum_axis.set(
+        xlabel="k",
+        ylabel="Maximum average population fitness",
+        title="Maximum average population fitness by condition",
+    )
+    maximum_figure.savefig(
+        RESULTS_DIR / "maximum_average_fitness_by_condition.png",
+        bbox_inches="tight",
+    )
     with (RESULTS_DIR / "summary.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(
-            file, fieldnames=["k", "runs", "mean_final_best", "std_final_best"]
+            file,
+            fieldnames=[
+                "k",
+                "runs",
+                "mean_final_average",
+                "std_final_average",
+                "mean_final_best",
+                "std_final_best",
+            ],
         )
         writer.writeheader()
         writer.writerows(summary)
+    if overall_best is not None:
+        (RESULTS_DIR / "overall_best.json").write_text(
+            json.dumps(overall_best, indent=2), encoding="utf-8"
+        )
 
 
 """RUN THE ACTUAL ALGORITHM"""
@@ -435,46 +536,35 @@ def plot_results() -> None:
 
 
 def main() -> None:
+    targets = get_targets()
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     for seed in SEEDS:
-        # create network
         nde = create_nde(seed)
-        # generate population
         for k in K:
+            rng = seed_operators(seed)
             population = initialise_pop(seed)
-        #
+            evaluate_population(population, nde, targets)
+            history: list[dict[str, Any]] = []
+            record_generation(population, seed, k, history)
 
-    """Score one randomly-sampled body against the target set."""
+            operations = build_operations(nde, targets, seed, k, rng, history)
+            run_directory = get_run_directory(seed, k)
+            ea = EA(
+                population,
+                operations,
+                num_steps=NUM_GENERATIONS,
+                is_maximisation=False,
+                db_file_path=run_directory / "database.db",
+                db_handling="delete",
+                quiet=True,
+            )
+            ea.run()
+            final_population = ea._fetch(only_alive=True, requires_eval=False)
+            save_run_results(final_population, nde, targets, seed, k, history)
+            plot_run_results(history, run_directory)
 
-    console.log(f"encoding      : {GENOTYPE}")
-    console.log(f"module budget : {NUM_OF_MODULES}")
-    console.log(f"targets       : {len(targets)} bodies from {TARGET_DIR.name}")
-    console.log(
-        "target sizes  : " + ", ".join(str(t.number_of_nodes()) for t in targets),
-    )
-
-    # How far apart are the targets from each other? Your fitness cannot go
-    # below the best possible compromise, and this is the clue to where that is.
-    spread = [
-        tree_edit_distance(a, b)
-        for i, a in enumerate(targets)
-        for b in targets[i + 1 :]
-    ]
-    console.log(f"target spread : mean pairwise distance {np.mean(spread):.2f}")
-
-    # --- One random body --------------------------------------------------- #
-    body = random_body(GENOTYPE, NUM_OF_MODULES)
-    fitness = fitness_function(body, targets)
-
-    console.log("")
-    console.log(f"random body   : {body.number_of_nodes()} modules")
-    console.log(
-        "per-target    : "
-        + ", ".join(f"{d:.1f}" for d in distances_to_targets(body, targets)),
-    )
-    console.log(f"fitness       : {fitness:.4f}   (lower is better)")
-
-    show_body(body, MODE, file_name=f"random_{GENOTYPE}")
+    plot_results()
 
 
 if __name__ == "__main__":

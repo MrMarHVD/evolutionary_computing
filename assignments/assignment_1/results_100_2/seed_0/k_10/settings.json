@@ -1,0 +1,18 @@
+{
+  "seed": 0,
+  "k": 10,
+  "population_size": 100,
+  "num_generations": 100,
+  "num_modules": 20,
+  "genotype_size": 64,
+  "num_chromosomes": 3,
+  "init_min": -1.0,
+  "init_max": 1.0,
+  "mutation_probability": 1.0,
+  "condition_mutation_probability": 1.0,
+  "mutation_sd": 0.1,
+  "tournament_size": 3,
+  "crossover_swap_probability": 0.5,
+  "fitness": "mean_plus_std_tree_edit_distance",
+  "minimize": true
+}
