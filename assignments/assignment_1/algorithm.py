@@ -22,10 +22,13 @@ from ariel.body_phenotypes.robogen_lite.decoders.hi_prob_decoding import \
 from ariel.ec import (EA, Crossover, EAOperation, FloatMutator,
                       FloatsGenerator, Individual, Population, config)
 from ariel.ec.genotypes.nde import NeuralDevelopmentalEncoding
+from ariel.ec.generators import _rng as ariel_rng
+from ariel.ec.individual import JSONIterable
 
 # Settings and constants
 HERE = Path(__file__).resolve().parent
 TARGET_DIR = HERE / "target_bodies"
+RESULTS_DIR = HERE / "results"
 GENOTYPE_SIZE = 64
 NUM_CHROMOSOMES = 3
 INIT_MIN, INIT_MAX = -1.0, 1.0
@@ -56,25 +59,72 @@ def get_targets() -> list[nx.DiGraph[int]]:
     return [load_graph_from_json(path) for path in paths]
 
 
-def random_nde_body(num_modules: int = NUM_MODULES) -> nx.DiGraph:
-    """Sample a random NDE genotype and decode it into a body graph.
+def seed_operators(seed: int) -> np.random.Generator:
+    """Reset operator randomness and return an RNG for mutation positions."""
+    random.seed(seed)
+    # Update in place: crossover holds a reference to this same RNG object.
+    # ARIEL currently provides no public operator-seeding function.
+    ariel_rng.bit_generator.state = np.random.default_rng(seed).bit_generator.state
+    return np.random.default_rng(seed)
 
-    THIS IS THE FUNCTION YOUR EA REPLACES. The three vectors below are the
-    genotype: that is what you mutate, recombine and select on. Note this
-    function does NOT construct its own `NeuralDevelopmentalEncoding` - it
-    reuses the module-level `_NDE` instance. Do the same in your EA.
 
-    `num_modules` must match the value `_NDE` was built with (NUM_OF_MODULES).
-    """
-    genotype = [
-        RNG.uniform(-1.0, 1.0, GENOTYPE_SIZE).astype(np.float32)  # module types
-        for _ in range(3)  # types, connections, rotations
-    ]
+# Create an NDE network from a seed
+def create_nde(seed: int) -> NeuralDevelopmentalEncoding:
+    torch.manual_seed(seed)
 
-    type_p, conn_p, rot_p = _NDE.forward(genotype)
+    return NeuralDevelopmentalEncoding(
+        number_of_modules=NUM_MODULES,
+        genotype_size=GENOTYPE_SIZE,
+    )
 
-    decoder = HighProbabilityDecoder(num_modules)
-    return decoder.probability_matrices_to_graph(type_p, conn_p, rot_p)
+
+# Initialise the population
+def initialise_pop(seed: int) -> Population:
+    rng = np.random.default_rng(seed)
+    individuals: list[Individual] = []
+
+    for i in range(POPULATION_SIZE):
+        individual = Individual()
+        individual.genotype = rng.uniform(
+            low=INIT_MIN,
+            high=INIT_MAX,
+            size=(NUM_CHROMOSOMES, GENOTYPE_SIZE),
+        ).tolist()
+
+        individuals.append(individual)
+
+    return Population(individuals)
+
+
+def decode_genome(
+    genotype: JSONIterable,
+    nde: NeuralDevelopmentalEncoding,
+) -> nx.DiGraph[int]:
+    """Decode an NDE genome into the body graph used for fitness."""
+    genes = np.asarray(genotype, dtype=np.float32)
+    if genes.shape != (NUM_CHROMOSOMES, GENOTYPE_SIZE):
+        raise ValueError(
+            f"Expected genome shape {(NUM_CHROMOSOMES, GENOTYPE_SIZE)}, "
+            f"got {genes.shape}"
+        )
+    scores = nde.forward(list(genes))
+    decoder = HighProbabilityDecoder(NUM_MODULES)
+    return decoder.probability_matrices_to_graph(*scores)
+
+
+def evaluate_population(
+    population: Population,
+    nde: NeuralDevelopmentalEncoding,
+    targets: list[nx.DiGraph[int]],
+) -> Population:
+    """Assign distance-based fitness to individuals requiring evaluation."""
+    if not targets:
+        raise ValueError("At least one target body is required")
+    for individual in population.unevaluated:
+        body = decode_genome(individual.genotype, nde)
+        # The fitness setter also clears requires_eval.
+        individual.fitness = mean_plus_std_tree_edit_distance(body, targets)
+    return population
 
 
 """RUN THE ACTUAL ALGORITHM"""
@@ -84,14 +134,13 @@ def random_nde_body(num_modules: int = NUM_MODULES) -> nx.DiGraph:
 # Seed Python, PyTorch, and both our own and ARIEL's operator RNGs explicitly.
 
 
+#
 # 4. Decode genomes and evaluate fitness
 # TODO: Decode to graphs and assign mean-plus-standard-deviation distance.
 # Lower fitness is better; no physics simulation is needed.
 
-
 # 5. Select parents
 # TODO: Run tournaments on evaluated individuals, preferring lower fitness.
-
 
 # 6. Create offspring through crossover
 # TODO: Recombine parent genomes and store them in new Individuals.
@@ -111,8 +160,16 @@ def random_nde_body(num_modules: int = NUM_MODULES) -> nx.DiGraph:
 
 
 def main() -> None:
+
+    for seed in SEEDS:
+        # create network
+        nde = create_nde(seed)
+        # generate population
+        for k in K:
+            population = initialise_pop(seed)
+        #
+
     """Score one randomly-sampled body against the target set."""
-    targets = load_targets()
 
     console.log(f"encoding      : {GENOTYPE}")
     console.log(f"module budget : {NUM_OF_MODULES}")
