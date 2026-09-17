@@ -28,8 +28,7 @@ from ariel.body_phenotypes.robogen_lite.decoders._blueprint import \
     load_graph_from_json
 from ariel.body_phenotypes.robogen_lite.decoders.hi_prob_decoding import \
     HighProbabilityDecoder
-from ariel.ec import (EA, Crossover, EAOperation, FloatMutator,
-                      FloatsGenerator, Individual, Population, config)
+from ariel.ec import Crossover, FloatMutator, Individual, Population
 from ariel.ec.generators import _rng as ariel_rng
 from ariel.ec.genotypes.nde import NeuralDevelopmentalEncoding
 from ariel.ec.individual import JSONIterable
@@ -247,24 +246,6 @@ def record_generation(
     return population
 
 
-def build_operations(
-    nde: NeuralDevelopmentalEncoding,
-    targets: list[nx.DiGraph[int]],
-    seed: int,
-    k: int,
-    rng: np.random.Generator,
-    history: list[dict[str, Any]],
-) -> list[EAOperation]:
-    """Build EA steps; evaluate and record the initial population beforehand."""
-    # Explicit bound arguments also avoid ARIEL's unresolved-annotation check.
-    return [
-        EAOperation(produce_offspring, k=k, rng=rng),
-        EAOperation(evaluate_population, nde=nde, targets=targets),
-        EAOperation(murder_majority, size=POPULATION_SIZE),
-        EAOperation(record_generation, seed=seed, k=k, history=history),
-    ]
-
-
 def get_run_directory(seed: int, k: int) -> Path:
     """Create the output directory for one seed and mutation condition."""
     directory = RESULTS_DIR / f"seed_{seed}" / f"k_{k}"
@@ -347,20 +328,12 @@ def main() -> None:
             history: list[dict[str, Any]] = []
             record_generation(population, seed, k, history)
 
-            operations = build_operations(nde, targets, seed, k, rng, history)
-            run_directory = get_run_directory(seed, k)
-            ea = EA(
-                population,
-                operations,
-                num_steps=NUM_GENERATIONS,
-                is_maximisation=False,
-                db_file_path=run_directory / "database.db",
-                db_handling="delete",
-                quiet=True,
-            )
-            ea.run()
-            final_population = ea._fetch(only_alive=True, requires_eval=False)
-            save_run_results(final_population, nde, targets, seed, k, history)
+            for _ in range(NUM_GENERATIONS):
+                population = produce_offspring(population, k, rng)
+                evaluate_population(population, nde, targets)
+                population = murder_majority(population)
+                record_generation(population, seed, k, history)
+            save_run_results(population, nde, targets, seed, k, history)
 
 
 if __name__ == "__main__":
