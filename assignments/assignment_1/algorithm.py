@@ -36,7 +36,7 @@ from ariel.ec.individual import JSONIterable
 # Settings and constants
 HERE = Path(__file__).resolve().parent
 TARGET_DIR = HERE / "target_bodies"
-RESULTS_DIR = HERE / "results_100_2"
+RESULTS_DIR = HERE / "results_100_3"
 GENOTYPE_SIZE = 64
 NUM_CHROMOSOMES = 3
 INIT_MIN, INIT_MAX = -1.0, 1.0
@@ -248,7 +248,7 @@ def record_generation(
 
 def get_run_directory(seed: int, k: int) -> Path:
     """Create the output directory for one seed and mutation condition."""
-    directory = RESULTS_DIR / f"seed_{seed}" / f"k_{k}"
+    directory = RESULTS_DIR / f"k_{k}" / f"seed_{seed}"
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -312,6 +312,118 @@ def save_run_results(
     return directory
 
 
+def load_histories_for_k(k: int) -> list[list[dict[str, Any]]]:
+    """Load all seed histories for one mutation condition."""
+    return [
+        json.loads(
+            (RESULTS_DIR / f"k_{k}" / f"seed_{seed}" / "history.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for seed in SEEDS
+    ]
+
+
+def plot_k_results(k: int) -> None:
+    """Plot mean and best fitness over generations for one k value."""
+    import matplotlib.pyplot as plt
+
+    histories = load_histories_for_k(k)
+    # Exclude generation zero so the plot has exactly NUM_GENERATIONS points.
+    rows = [history[1:] for history in histories]
+    mean_values = np.asarray([[row["mean"] for row in history] for history in rows])
+    best_values = np.asarray([[row["best"] for row in history] for history in rows])
+    generations = np.arange(1, NUM_GENERATIONS + 1)
+
+    figure, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    for axis, values, title in (
+        (axes[0], mean_values, "Average population fitness"),
+        (axes[1], best_values, "Best population fitness"),
+    ):
+        average = values.mean(axis=0)
+        spread = values.std(axis=0)
+        axis.plot(generations, average)
+        axis.fill_between(generations, average - spread, average + spread, alpha=0.2)
+        axis.set_ylabel("Fitness")
+        axis.set_title(title)
+        axis.grid(alpha=0.25)
+    axes[1].set_xlabel("Generation")
+    figure.suptitle(f"Fitness over generations (k={k})")
+    figure.tight_layout()
+    figure.savefig(RESULTS_DIR / f"k_{k}" / "fitness_by_generation.png", dpi=150)
+    plt.close(figure)
+
+
+def plot_all_k_results() -> None:
+    """Create aggregate plots and the final-fitness table across k values."""
+    import matplotlib.pyplot as plt
+
+    mean_by_k: dict[int, np.ndarray] = {}
+    best_by_k: dict[int, np.ndarray] = {}
+    final_rows: list[dict[str, float | int]] = []
+    generations = np.arange(1, NUM_GENERATIONS + 1)
+
+    for k in K:
+        histories = load_histories_for_k(k)
+        rows = [history[1:] for history in histories]
+        mean_values = np.asarray([[row["mean"] for row in history] for history in rows])
+        best_values = np.asarray([[row["best"] for row in history] for history in rows])
+        mean_by_k[k] = mean_values.mean(axis=0)
+        best_by_k[k] = best_values.mean(axis=0)
+        final_rows.append(
+            {
+                "k": k,
+                "average_final_fitness": float(mean_by_k[k][-1]),
+                "best_final_fitness": float(best_by_k[k][-1]),
+                "average_final_fitness_std": float(mean_values[:, -1].std()),
+                "best_final_fitness_std": float(best_values[:, -1].std()),
+            }
+        )
+
+    for name, values, ylabel in (
+        ("average_fitness_all_k.png", mean_by_k, "Average population fitness"),
+        ("best_fitness_all_k.png", best_by_k, "Best population fitness"),
+    ):
+        figure, axis = plt.subplots(figsize=(10, 6))
+        for k, series in values.items():
+            axis.plot(generations, series, label=f"k={k}")
+        axis.set(xlabel="Generation", ylabel="Fitness", title=ylabel)
+        axis.grid(alpha=0.25)
+        axis.legend()
+        figure.tight_layout()
+        figure.savefig(RESULTS_DIR / name, dpi=150)
+        plt.close(figure)
+
+    x = np.arange(len(K))
+    width = 0.38
+    figure, axis = plt.subplots(figsize=(10, 6))
+    average_final = [row["average_final_fitness"] for row in final_rows]
+    best_final = [row["best_final_fitness"] for row in final_rows]
+    axis.bar(x - width / 2, average_final, width, label="Average fitness")
+    axis.bar(x + width / 2, best_final, width, label="Best fitness")
+    axis.set_xticks(x, [str(k) for k in K])
+    axis.set(
+        xlabel="k",
+        ylabel="Final-generation fitness",
+        title="Final fitness by condition",
+    )
+    axis.grid(axis="y", alpha=0.25)
+    axis.legend()
+    figure.tight_layout()
+    figure.savefig(RESULTS_DIR / "final_fitness_by_k.png", dpi=150)
+    plt.close(figure)
+
+    with (RESULTS_DIR / "final_fitness_by_k.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as file:
+        writer = csv.DictWriter(file, fieldnames=list(final_rows[0]))
+        writer.writeheader()
+        writer.writerows(final_rows)
+    (RESULTS_DIR / "final_fitness_by_k.json").write_text(
+        json.dumps(final_rows, indent=2), encoding="utf-8"
+    )
+
+
 """RUN THE ACTUAL ALGORITHM"""
 
 
@@ -334,6 +446,9 @@ def main() -> None:
                 population = murder_majority(population)
                 record_generation(population, seed, k, history)
             save_run_results(population, nde, targets, seed, k, history)
+    for k in K:
+        plot_k_results(k)
+    plot_all_k_results()
 
 
 if __name__ == "__main__":
