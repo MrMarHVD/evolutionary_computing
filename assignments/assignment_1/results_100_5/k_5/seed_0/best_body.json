@@ -1,0 +1,114 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "type": "CORE",
+      "rotation": "DEG_0",
+      "id": 0
+    },
+    {
+      "type": "BRICK",
+      "rotation": "DEG_90",
+      "id": 2
+    },
+    {
+      "type": "HINGE",
+      "rotation": "DEG_45",
+      "id": 3
+    },
+    {
+      "type": "HINGE",
+      "rotation": "DEG_90",
+      "id": 4
+    },
+    {
+      "type": "HINGE",
+      "rotation": "DEG_90",
+      "id": 6
+    },
+    {
+      "type": "HINGE",
+      "rotation": "DEG_45",
+      "id": 7
+    },
+    {
+      "type": "BRICK",
+      "rotation": "DEG_90",
+      "id": 8
+    },
+    {
+      "type": "BRICK",
+      "rotation": "DEG_90",
+      "id": 9
+    },
+    {
+      "type": "BRICK",
+      "rotation": "DEG_90",
+      "id": 10
+    },
+    {
+      "type": "HINGE",
+      "rotation": "DEG_45",
+      "id": 13
+    },
+    {
+      "type": "BRICK",
+      "rotation": "DEG_0",
+      "id": 15
+    }
+  ],
+  "edges": [
+    {
+      "face": "FRONT",
+      "source": 0,
+      "target": 3
+    },
+    {
+      "face": "BACK",
+      "source": 0,
+      "target": 4
+    },
+    {
+      "face": "FRONT",
+      "source": 3,
+      "target": 15
+    },
+    {
+      "face": "FRONT",
+      "source": 4,
+      "target": 9
+    },
+    {
+      "face": "RIGHT",
+      "source": 8,
+      "target": 10
+    },
+    {
+      "face": "LEFT",
+      "source": 8,
+      "target": 2
+    },
+    {
+      "face": "FRONT",
+      "source": 9,
+      "target": 13
+    },
+    {
+      "face": "LEFT",
+      "source": 10,
+      "target": 6
+    },
+    {
+      "face": "BOTTOM",
+      "source": 15,
+      "target": 7
+    },
+    {
+      "face": "LEFT",
+      "source": 15,
+      "target": 8
+    }
+  ]
+}

@@ -36,7 +36,7 @@ from ariel.ec.individual import JSONIterable
 # Settings and constants
 HERE = Path(__file__).resolve().parent
 TARGET_DIR = HERE / "target_bodies"
-RESULTS_DIR = HERE / "results_100_3"
+RESULTS_DIR = HERE / "results_100_5"
 GENOTYPE_SIZE = 64
 NUM_CHROMOSOMES = 3
 INIT_MIN, INIT_MAX = -1.0, 1.0
@@ -44,7 +44,7 @@ NUM_MODULES = 20
 
 POPULATION_SIZE = 100  # TODO: determine the right size, use this for both initial population size and number of offspring per generation
 NUM_GENERATIONS = 100
-MUTATION_PROBABILITY = 1.0
+MUTATION_PROBABILITY = 0.1
 MUTATION_SD = 0.1
 TOURNAMENT_SIZE = 3
 CROSSOVER_PROBABILITY = 0.5
@@ -423,7 +423,7 @@ def plot_all_k_results() -> None:
 def main() -> None:
     targets = get_targets()
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
+    """
     for seed in SEEDS:
         nde = create_nde(seed)
         for k in K:
@@ -439,6 +439,8 @@ def main() -> None:
                 population = murder_majority(population)
                 record_generation(population, seed, k, history)
             save_run_results(population, nde, targets, seed, k, history)
+
+    """
     for k in K:
         plot_k_results(k)
     plot_all_k_results()
