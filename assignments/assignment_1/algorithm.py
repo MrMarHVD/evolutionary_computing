@@ -110,11 +110,6 @@ def decode_genome(
 ) -> nx.DiGraph[int]:
     """Decode an NDE genome into the body graph used for fitness."""
     genes = np.asarray(genotype, dtype=np.float32)
-    if genes.shape != (NUM_CHROMOSOMES, GENOTYPE_SIZE):
-        raise ValueError(
-            f"Expected genome shape {(NUM_CHROMOSOMES, GENOTYPE_SIZE)}, "
-            f"got {genes.shape}"
-        )
     scores = nde.forward(list(genes))
     decoder = HighProbabilityDecoder(NUM_MODULES)
     return decoder.probability_matrices_to_graph(*scores)
@@ -126,8 +121,6 @@ def evaluate_population(
     targets: list[nx.DiGraph[int]],
 ) -> Population:
     """Assign distance-based fitness to individuals requiring evaluation."""
-    if not targets:
-        raise ValueError("At least one target body is required")
     for individual in population.unevaluated:
         body = decode_genome(individual.genotype, nde)
         # The fitness setter also clears requires_eval.
