@@ -400,6 +400,8 @@ def plot_all_k_results() -> None:
         ylabel="Final-generation fitness",
         title="Final fitness by condition",
     )
+    axis.set_ylim(13.5,14.5)
+    axis.set_yticks(np.arange(13.5, 14.5, 0.1))
     axis.grid(axis="y", alpha=0.25)
     axis.legend()
     figure.tight_layout()
