@@ -321,6 +321,7 @@ def plot_k_results(k: int) -> None:
     """Plot mean and best fitness over generations for one k value."""
     import matplotlib.pyplot as plt
 
+    plt.rcParams.update(PLOT_STYLE)
     histories = load_histories_for_k(k)
     # Exclude generation zero so the plot has exactly NUM_GENERATIONS points.
     rows = [history[1:] for history in histories]
@@ -346,11 +347,21 @@ def plot_k_results(k: int) -> None:
     figure.savefig(RESULTS_DIR / f"k_{k}" / "fitness_by_generation.png", dpi=150)
     plt.close(figure)
 
+PLOT_STYLE = {
+    "font.size": 20,
+    "axes.titlesize": 20,
+    "axes.labelsize": 20,
+    "xtick.labelsize": 20,
+    "ytick.labelsize": 20,
+    "legend.fontsize": 15,
+    "figure.titlesize": 20,
+}
 
 def plot_all_k_results() -> None:
     """Create aggregate plots and the final-fitness table across k values."""
     import matplotlib.pyplot as plt
 
+    plt.rcParams.update(PLOT_STYLE)
     mean_by_k: dict[int, np.ndarray] = {}
     best_by_k: dict[int, np.ndarray] = {}
     final_rows: list[dict[str, float | int]] = []
