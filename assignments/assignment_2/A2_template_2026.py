@@ -23,10 +23,12 @@ HOW TO RUN
 Change MODE below to switch between an interactive viewer, a headless run,
 a rendered video, or a single frame.
 """
-
+import argparse
+import csv
+from datetime import datetime
 # Standard library
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 # Third-party libraries
 import mujoco as mj
@@ -37,9 +39,9 @@ from mujoco import viewer
 # Local libraries (ARIEL)
 from ariel import console
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
-from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
-from ariel.ec import set_seed
-from ariel.simulation.environments import SimpleFlatWorld
+from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import centipede_3
+from ariel.ec import set_seed, config, Population, Individual, EAOperation, EA, Crossover
+from ariel.simulation.environments import SimpleFlatWorld, OlympicArena
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
 from ariel.utils.video_recorder import VideoRecorder
@@ -61,20 +63,23 @@ set_seed(SEED)
 # --- DATA SETUP --- #
 SCRIPT_NAME = Path(__file__).stem
 CWD = Path.cwd()
-DATA = CWD / "__data__" / SCRIPT_NAME
-DATA.mkdir(parents=True, exist_ok=True)
+RUN_ID = datetime.now().strftime("%Y-%m-%d_%H-%M_%S_%f")
+
+DATA = CWD / "__data__" / SCRIPT_NAME / f"seed_{SEED}_{RUN_ID}"
+FITNESS_CSV = DATA / "fitness_data" / f"fitness.csv"
 
 # --- EXPERIMENT CONSTANTS --- #
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]  # where the robot starts
-TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up
-SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
+#TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up
+TARGET_POSITION: list[float] = [5.5, 0.0, 0.1]
+SIM_DURATION: float = 40.0  # seconds of simulated time per evaluation
 MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
 
 
 # ============================================================================ #
 #  1. THE BODY AND THE WORLD
 # ============================================================================ #
-def build_world() -> SimpleFlatWorld:
+def build_world() -> OlympicArena:
     """Create the environment the robot lives in.
 
     YOU MAY CHANGE THIS. Options include: SimpleFlatWorld, RuggedTerrainWorld,
@@ -85,7 +90,20 @@ def build_world() -> SimpleFlatWorld:
     other, and say in your report which one you used. A controller evolved on
     flat ground and one evolved on rugged terrain are not comparable numbers.
     """
-    return SimpleFlatWorld()
+    world = OlympicArena()
+    world.spec.worldbody.add_site(
+        name="target_marker",
+        type=mj.mjtGeom.mjGEOM_CYLINDER,
+        pos=[
+            TARGET_POSITION[0],
+            TARGET_POSITION[1],
+            1.01
+        ],
+        size=[TARGET_RADIUS, 0.01, 0.0],
+        rgba=[0.1, 0.9, 0.1, 0.7]
+    )
+    return world
+    #return OlympicArena()
 
 
 def build_robot() -> CoreModule:
@@ -102,7 +120,7 @@ def build_robot() -> CoreModule:
     Change the body and your genotype length changes with it. Keep the body
     FIXED within an experiment.
     """
-    return gecko()
+    return centipede_3()
 
 
 # ============================================================================ #
@@ -202,6 +220,43 @@ def make_random_weights(
 #
 # ============================================================================ #
 
+TARGET_RADIUS = 0.15
+
+STILL_RADIUS = 0.1
+STILL_PENALTY = 0.5
+INVALID_FITNESS = 1_000_000.0
+
+FINAL_DISTANCE_WEIGHT = 0.75
+MEAN_DISTANCE_WEIGHT = 0.25
+
+def _distance(x: npt.NDArray[np.float64], y: npt.NDArray[np.float64]) -> float:
+    return float(np.linalg.norm(x[:2] - y[:2]))
+
+def _fitness_when_target_reached(time_to_target: float | None, duration: float) -> float:
+    if time_to_target is None:
+        return 1.0
+    return float(
+        np.clip(
+                time_to_target / max(duration, 1e-6),
+                0.0, 1.0
+        )
+    )
+
+def _fitness_when_target_not_reached(
+    initial_distance: float,
+    final_distance: float,
+    mean_distance: float
+) -> float:
+    distance_scale = max(initial_distance, 1e-6)
+
+    normalized_final = final_distance / distance_scale
+    normalized_mean = mean_distance / distance_scale
+
+    return float(
+        1.0
+        + FINAL_DISTANCE_WEIGHT * normalized_final
+        + MEAN_DISTANCE_WEIGHT * normalized_mean
+    )
 
 def get_core_position(data: mj.MjData) -> npt.NDArray[np.float64]:
     """Return the robot core's current (x, y, z) world position."""
@@ -211,6 +266,10 @@ def get_core_position(data: mj.MjData) -> npt.NDArray[np.float64]:
 def fitness_function(
     initial_position: npt.NDArray[np.float64],
     final_position: npt.NDArray[np.float64],
+    target_position: npt.NDArray[np.float64],
+    mean_distance: float,
+    time_to_target: float | None,
+    duration: float,
 ) -> float:
     """Score one evaluation. LOWER IS BETTER.
 
@@ -226,16 +285,37 @@ def fitness_function(
         closer to the target in any way you care about.
     See `ariel.simulation.tasks.targeted_locomotion` for some worked variants.
     """
-    target = np.asarray(TARGET_POSITION)
-    return float(np.linalg.norm(final_position[:2] - target[:2]))
+    #target = np.asarray(TARGET_POSITION)
+    #return float(np.linalg.norm(final_position[:2] - target[:2]))
+    initial_distance = _distance(initial_position, target_position)
+    final_distance = _distance(final_position, target_position)
 
+    values = [
+        initial_distance,
+        final_distance,
+        mean_distance,
+        duration
+    ]
+
+    if not np.all(np.isfinite(values)):
+        return INVALID_FITNESS
+    if duration <= 0.0:
+        return INVALID_FITNESS
+
+    reached_target = final_distance <= TARGET_RADIUS
+    if reached_target:
+        fitness = _fitness_when_target_reached(time_to_target, duration)
+    else:
+        fitness = _fitness_when_target_not_reached(initial_distance, final_distance, mean_distance)
+
+    return float(fitness)
 
 # ============================================================================ #
 #  4. RUNNING ONE EVALUATION
 # ============================================================================ #
 
 
-def run_experiment(mode: ViewerTypes = MODE) -> float:
+def run_experiment(genome: list[float], mode: ViewerTypes = MODE) -> float:
     """Set up the world, run one simulation, and return the fitness.
 
     This is the function your EA calls once per individual, with `mode` set
@@ -273,22 +353,60 @@ def run_experiment(mode: ViewerTypes = MODE) -> float:
     input_size = len(data.qpos)
     output_size = model.nu
 
-    weights = make_random_weights(input_size, output_size)
+    weights = decode_genome(genome, input_size, output_size)
+    target = np.asarray(TARGET_POSITION, dtype=np.float64)
+
+    initial_position = get_core_position(data)
+    max_displacement = 0.0
+    initial_distance = _distance(initial_position, target)
+    start_time = float(data.time)
+
+    last_time = start_time
+    last_distance = initial_distance
+
+    distance_integral = 0.0
+    time_to_target: float | None = None
+    if initial_distance <= TARGET_RADIUS:
+        time_to_target = 0.0
 
     def control_callback(m: mj.MjModel, d: mj.MjData) -> None:
         """Compute and apply actions; MuJoCo calls this every physics step."""
+        nonlocal last_time
+        nonlocal last_distance
+        nonlocal distance_integral
+        nonlocal time_to_target
+        nonlocal max_displacement
+
         actions = nn_controller(m, d, weights)
 
         # DIRECT application (see the controller contract above).
-        d.ctrl[:] = actions
+        # d.ctrl[:] = actions
 
         # DELTA application - comment out the line above and use these instead:
-        # delta = 0.05
-        # d.ctrl[:] += actions * delta
-        # d.ctrl[:] = np.clip(d.ctrl, -np.pi / 2, np.pi / 2)
+        delta = 0.05
+        d.ctrl[:] += actions * delta
+        d.ctrl[:] = np.clip(d.ctrl, -np.pi / 2, np.pi / 2)
 
     # --- Record the starting point ----------------------------------------- #
-    initial_position = get_core_position(data)
+        current_time = float(d.time)
+        dt = current_time - last_time
+        if dt <= 0.0:
+            return
+
+        current_position = get_core_position(d)
+        max_displacement = max(max_displacement, _distance(current_position, initial_position))
+        current_distance = _distance(current_position, target)
+        distance_integral += (
+            0.5
+            * (last_distance + current_distance)
+            * dt
+        )
+
+        if time_to_target is None and current_distance <= TARGET_RADIUS:
+            time_to_target = current_time - start_time
+
+        last_time = current_time
+        last_distance = current_distance
 
     # --- Run ---------------------------------------------------------------- #
     if mode != "no_control":
@@ -324,19 +442,208 @@ def run_experiment(mode: ViewerTypes = MODE) -> float:
 
     # --- Score -------------------------------------------------------------- #
     final_position = get_core_position(data)
-    fitness = fitness_function(initial_position, final_position)
+    max_displacement = max(max_displacement, _distance(final_position, initial_position))
+    final_distance = _distance(final_position, target)
+    end_time = float(data.time)
+
+    elapsed_time = end_time - start_time
+    remaining_dt = end_time - last_time
+    if remaining_dt > 0.0:
+        distance_integral += (
+            0.5
+            * (last_distance + final_distance)
+            * remaining_dt
+        )
+
+    if elapsed_time > 0.0:
+        mean_distance = distance_integral / elapsed_time
+    else:
+        mean_distance = final_distance
+
+    if (time_to_target is None and final_distance <= TARGET_RADIUS):
+        time_to_target = elapsed_time
+
+    fitness = fitness_function(
+        initial_position = initial_position,
+        final_position = final_position,
+        target_position=target,
+        mean_distance=mean_distance,
+        time_to_target=time_to_target,
+        duration=elapsed_time,
+    )
+
+    fitness += STILL_PENALTY * max(0.0, 1.0 - max_displacement / STILL_RADIUS)
 
     console.log(f"start  : {np.round(initial_position, 3)}")
     console.log(f"end    : {np.round(final_position, 3)}")
     console.log(f"target : {np.round(TARGET_POSITION, 3)}")
     console.log(f"fitness: {fitness:.4f}   (lower is better)")
 
+    console.log(f"final distance: {final_distance:.4f}")
+    console.log(f"mean distance: {mean_distance:.4f}")
+    console.log(f"time to target: {time_to_target}")
     return fitness
 
+POPULATION_SIZE = 100
+GENERATIONS = 30
+OFFSPRING_SIZE = 30
+TOURNAMENT_SIZE = 3
+
+MUTATION_RATE = 0.6
+MUTATION_SIGMA = 0.08
+WEIGHT_LIMIT = 3.0
+
+CROSSOVER_PROBABILITY = 0.5
+SWAP_PROBABILITY = 0.5
+
+def make_individual(input_size: int, output_size: int) -> Individual:
+    individual = Individual()
+    individual.genotype = make_random_genome(input_size, output_size)
+    return individual
+
+def make_random_genome(input_size: int, output_size: int) -> list[float]:
+    number_of_weights = (input_size * HIDDEN_SIZE + HIDDEN_SIZE * output_size)
+    return RNG.normal(loc=0.0, scale=0.5, size=number_of_weights).tolist()
+
+def decode_genome(genome: list[float], input_size: int, output_size: int) -> list[npt.NDArray[np.float64]]:
+    genome_array = np.asarray(genome, dtype=np.float64)
+    w1_size = input_size * HIDDEN_SIZE
+
+    w1 = genome_array[:w1_size].reshape(input_size, HIDDEN_SIZE)
+    w2 = genome_array[w1_size:].reshape(HIDDEN_SIZE, output_size)
+
+    return [w1, w2]
+
+def evaluate(population: Population) -> Population:
+    unevaluated = list(population.unevaluated)
+
+    for idx, individual in enumerate(unevaluated, start=1):
+        console.log(f"Evaluating individual {idx}/{len(unevaluated)}")
+        genome = cast(list[float], individual.genotype)
+
+        individual.fitness = run_experiment(genome, mode="simple")
+        console.log(f"fitness={individual.fitness:.4f}")
+    return population
+
+def parent_selection(population: Population) -> Population:
+    alive = list(population.alive)
+    for individual in alive:
+        individual.tags = {"mating_count": 0}
+    tournament_size = min(TOURNAMENT_SIZE, len(alive))
+
+    for _ in range(OFFSPRING_SIZE):
+        candidate_indices = RNG.choice(len(alive), size=tournament_size, replace=False)
+        candidates = [
+            alive[int(index)]
+            for index in candidate_indices
+        ]
+
+        winner = min(candidates, key=lambda ind: ind.fitness)
+        mating_count = winner.tags.get("mating_count", 0)
+        winner.tags = {
+            "mating_count": mating_count + 1
+        }
+    return population
+
+def survivor_selection(population: Population) -> Population:
+    ranked = sorted(population.alive, key=lambda ind: ind.fitness)
+    for individual in ranked[POPULATION_SIZE:]:
+        individual.alive = False
+    return population
+
+def crossover(population: Population) -> Population:
+    parent_slots: list[Individual] = []
+
+    for parent in population.alive:
+        mating_count = int(parent.tags.get("mating_count", 0))
+        parent_slots.extend([parent] * mating_count)
+
+    order = RNG.permutation(len(parent_slots))
+    parent_slots = [
+        parent_slots[int(idx)]
+        for idx in order
+    ]
+
+    for idx in range (0, len(parent_slots), 2):
+        parent_a = parent_slots[idx]
+        parent_b = parent_slots[idx + 1]
+
+        if RNG.random() < CROSSOVER_PROBABILITY:
+            genome_a, genome_b = Crossover.uniform(
+                parent_a.genotype,
+                parent_b.genotype,
+                swap_probability=SWAP_PROBABILITY
+            )
+        else:
+            genome_a = cast(list[float], parent_a.genotype).copy()
+            genome_b = cast(list[float], parent_b.genotype).copy()
+
+        child_a = Individual()
+        child_a.genotype = genome_a
+        child_b = Individual()
+        child_b.genotype = genome_b
+        population.extend([child_a, child_b])
+    return population
+
+def mutate(population: Population) -> Population:
+    for individual in population.unevaluated:
+        genome = np.asarray(
+            cast(list[float], individual.genotype),
+            dtype=np.float64
+        ).copy()
+
+        rate = MUTATION_RATE if RNG.random() < 0.25 else 0.10
+        mutation_mask = RNG.random(genome.size) < rate
+        number_of_mutations = int(np.count_nonzero(mutation_mask))
+
+        genome[mutation_mask] += RNG.normal(
+            loc=0.0,
+            scale=MUTATION_SIGMA,
+            size=number_of_mutations
+        )
+
+        genome = np.clip(genome, -WEIGHT_LIMIT, WEIGHT_LIMIT)
+        individual.genotype = genome.tolist()
+    return population
+
+def save_fitness_csv(history: list[dict[str, int | float]]) -> None:
+    FITNESS_CSV.parent.mkdir(parents=True, exist_ok=True)
+    fields = ["generation", "best", "mean", "worst", "std"]
+    with FITNESS_CSV.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.DictWriter(output, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(history)
+
+def plot_fitness_from_csv() -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
+
+    plt.rcParams.update({"font.size": 14})
+    with FITNESS_CSV.open(newline="", encoding="utf-8") as source:
+        history = list(csv.DictReader(source))
+    generations = [int(row["generation"]) for row in history]
+    figure, axes = plt.subplots(2,1, figsize=(9,7), sharex=True)
+    for axis, key, title in (
+        (axes[0], "mean", "Mean fitness of the population"),
+        (axes[1], "best", "Best fitness of the population"),
+    ):
+        axis.plot(generations, [float(row[key]) for row in history], linewidth=2)
+        axis.set(title=title, ylabel="Fitness (lower is better)")
+        axis.grid(alpha=0.25)
+    axes[1].set_xlabel("Generation (0 = Start population)")
+    axes[1].xaxis.set_major_locator(MaxNLocator(integer=True))
+    figure.tight_layout()
+    figure.savefig(DATA / f"fitness_seed_{SEED}.png", dpi=150)
+    plt.close(figure)
 
 def main() -> None:
     """Run a single demo evaluation with a randomly-weighted controller."""
     # A quick look at the size of the problem you are about to search.
+    DATA.mkdir(parents=True, exist_ok=False)
+
     mj.set_mjcb_control(None)
     world = build_world()
     robot = build_robot()
@@ -358,12 +665,71 @@ def main() -> None:
     console.log(f"controller outputs (model.nu)      : {output_size}")
     console.log(f"genotype length (total weights)    : {num_weights}")
 
-    run_experiment(MODE)
+    config.target_population_size = POPULATION_SIZE
 
+    initial_population = Population([
+        make_individual(input_size, output_size)
+        for _ in range(POPULATION_SIZE)
+    ])
+
+    history: list[dict[str, int | float]] = []
+    def record_generation(population: Population) -> Population:
+        fitness = np.asarray([ind.fitness for ind in population.alive], dtype=float)
+        history.append({
+            "generation": len(history),
+            "best": float(fitness.min()),
+            "mean": float(fitness.mean()),
+            "worst": float(fitness.max()),
+            "std": float(fitness.std())
+        })
+        return population
+
+    initial_population = record_generation(evaluate(initial_population))
+
+    operations: list[EAOperation] = [
+        EAOperation(parent_selection),
+        EAOperation(crossover),
+        EAOperation(mutate),
+        EAOperation(evaluate),
+        EAOperation(survivor_selection),
+        EAOperation(record_generation)
+    ]
+
+    ea = EA(
+        initial_population,
+        operations,
+        num_steps=GENERATIONS,
+        is_maximisation=False,
+        db_file_path=DATA / "database.db",
+        db_handling="halt"
+    )
+    ea.run()
+    save_fitness_csv(history)
+    plot_fitness_from_csv()
+
+    best_individual = ea.get_solution("best", only_alive=False)
+    best_genome = cast(list[float], best_individual.genotype)
+    console.log(
+        f"Best individual: {best_individual.id}, "
+        f"fitness={best_individual.fitness:.4f}"
+    )
+    run_experiment(best_genome, mode="video")
 
 if __name__ == "__main__":
-    main()
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--plot-only",
+        help="Recreate the plot from the stored fitness CSV without running the EA.",
+        type=Path,
+        metavar="CSV"
+    )
+    args = parser.parse_args()
+    if args.plot_only is not None:
+        FITNESS_CSV = args.plot_only
+        DATA = FITNESS_CSV.parent.parent
+        plot_fitness_from_csv()
+    else:
+        main()
 
 # ============================================================================ #
 #  YOUR JOB
