@@ -1,10 +1,14 @@
 """Compare five crossover conditions for a fixed John Set gecko."""
 
-import argparse
 import csv
 import json
 import random
+import sys
 from pathlib import Path
+
+# Allow direct execution from the assignment directory.
+ARIEL_SRC = Path(__file__).resolve().parents[2] / "src"
+sys.path.insert(0, str(ARIEL_SRC))
 
 import mujoco as mj
 import numpy as np
@@ -17,6 +21,21 @@ from ariel.ec import (
 from ariel.simulation.environments import OlympicArena
 from ariel.simulation.tasks.targeted_locomotion import distance_to_target
 
+# Settings and constants
+HERE = Path(__file__).resolve().parent
+RESULTS_DIR = HERE / "results"
+POPULATION_SIZE = 20
+OFFSPRING_SIZE = 20
+NUM_GENERATIONS = 100
+SEEDS = list(range(5))
+INIT_SD = 0.5
+MUTATION_PROBABILITY = 0.1
+MUTATION_SD = 0.1
+HIDDEN_SIZE = 6
+SIM_DURATION = 15.0
+PLOT_ONLY = False
+PLOT_STYLE = {"font.size": 14, "legend.fontsize": 11}
+
 CONDITIONS = (
     "none", "local_discrete", "local_intermediate",
     "global_discrete", "global_intermediate",
@@ -25,11 +44,74 @@ SPAWN = [-0.8, 0.0, 0.1]
 TARGET = np.array([5.42, 0.0, 0.0])
 
 
+# Evolutionary steps
+
+def seed_operators(seed: int) -> None:
+    """Reset Python and Ariel randomness for one independent run."""
+    random.seed(seed)
+    set_seed(seed)
+
+
 def make_individual(weights) -> Individual:
-    """Copy a weight vector into a new, unevaluated candidate."""
+    """Copy weights into a fresh, unevaluated candidate."""
     individual = Individual()
     individual.genotype = list(weights)
     return individual
+
+
+def build_model() -> mj.MjModel:
+    """Compile the fixed John Set gecko in OlympicArena once."""
+    mj.set_mjcb_control(None)
+    world = OlympicArena()
+    world.spawn(gecko().spec, position=SPAWN, correct_collision_with_floor=True)
+    return world.spec.compile()
+
+
+def initialise_pop(model: mj.MjModel) -> Population:
+    """Sample one normally distributed weight vector per controller."""
+    size = (model.nq + 4 + model.nu) * HIDDEN_SIZE
+    return Population([make_individual(FloatsGenerator.normal(std=INIT_SD, size=size))
+                       for _ in range(POPULATION_SIZE)])
+
+
+def decode_genome(genotype, model: mj.MjModel):
+    """Reshape the flat genotype into the two neural-network weight matrices."""
+    weights = np.asarray(genotype)
+    split = (model.nq + 4) * HIDDEN_SIZE
+    return weights[:split].reshape(-1, HIDDEN_SIZE), weights[split:].reshape(HIDDEN_SIZE, model.nu)
+
+
+def nn_controller(state, weights):
+    """Map positions, target offset, and a 1 Hz clock to hinge angles."""
+    phase = 2 * np.pi * state.time
+    inputs = np.concatenate((state.qpos, TARGET[:2] - state.qpos[:2],
+                             [np.sin(phase), np.cos(phase)]))
+    w1, w2 = weights
+    return np.tanh(np.tanh(inputs @ w1) @ w2) * (np.pi / 2)
+
+
+def evaluate_population(population: Population, model: mj.MjModel) -> Population:
+    """Reset and simulate each unevaluated controller; score final planar distance."""
+    steps = int(np.ceil(SIM_DURATION / model.opt.timestep))
+    for individual in population.unevaluated:
+        weights = decode_genome(individual.genotype, model)
+        data = mj.MjData(model)
+        mj.mj_resetData(model, data)
+        mj.mj_forward(model, data)
+
+        def control(model, state):
+            """Apply the current controller at each physics step."""
+            state.ctrl[:] = nn_controller(state, weights)
+
+        try:
+            mj.set_mjcb_control(control)
+            mj.mj_step(model, data, nstep=steps)
+        finally:
+            mj.set_mjcb_control(None)
+        if not np.isfinite(data.qpos).all() or data.time < (steps - 0.5) * model.opt.timestep:
+            raise FloatingPointError("Simulation diverged; run stopped.")
+        individual.fitness = distance_to_target(data.qpos[:3], TARGET)
+    return population
 
 
 def recombine(parents: Population, condition: str) -> list[float]:
@@ -57,161 +139,187 @@ def recombine(parents: Population, condition: str) -> list[float]:
     return weights
 
 
-class Evaluator:
-    """Reuse a compiled arena while resetting simulation state per candidate."""
-
-    def __init__(self, hidden: int, duration: float):
-        """Build the fixed body/world and determine network and simulation sizes."""
-        mj.set_mjcb_control(None)
-        world = OlympicArena()
-        world.spawn(gecko().spec, position=SPAWN, correct_collision_with_floor=True)
-        self.model = world.spec.compile()
-        self.hidden = hidden
-        self.steps = int(np.ceil(duration / self.model.opt.timestep))
-        self.inputs = self.model.nq + 4
-        self.split = self.inputs * hidden
-        self.size = self.split + hidden * self.model.nu
-
-    def evaluate(self, population: Population) -> Population:
-        """Score unevaluated controllers by final planar distance; lower is better."""
-        for individual in population.unevaluated:
-            # Decode input-to-hidden and hidden-to-output matrices, then reset.
-            weights = np.asarray(individual.genotype)
-            w1 = weights[:self.split].reshape(self.inputs, self.hidden)
-            w2 = weights[self.split:].reshape(self.hidden, self.model.nu)
-            data = mj.MjData(self.model)
-            mj.mj_resetData(self.model, data)
-            mj.mj_forward(self.model, data)
-
-            def control(model, state):
-                """Map joint/body positions, target offset, and a 1 Hz clock to hinge angles."""
-                phase = 2 * np.pi * state.time
-                inputs = np.concatenate((
-                    state.qpos, TARGET[:2] - state.qpos[:2],
-                    [np.sin(phase), np.cos(phase)],
-                ))
-                state.ctrl[:] = np.tanh(np.tanh(inputs @ w1) @ w2) * (np.pi / 2)
-
-            try:
-                # Run the fixed duration and always release MuJoCo's global callback.
-                mj.set_mjcb_control(control)
-                mj.mj_step(self.model, data, nstep=self.steps)
-            finally:
-                mj.set_mjcb_control(None)
-            if (not np.isfinite(data.qpos).all()
-                    or data.time < (self.steps - 0.5) * self.model.opt.timestep):
-                raise FloatingPointError("Simulation diverged; run stopped.")
-            individual.fitness = distance_to_target(data.qpos[:3], TARGET)
-        return population
+def create_offspring(population: Population, condition: str) -> Population:
+    """Select parents and create the fixed offspring batch for this condition."""
+    return Population([make_individual(recombine(population, condition))
+                       for _ in range(OFFSPRING_SIZE)])
 
 
-def select_survivors(population: Population, size: int) -> Population:
-    """Keep the best parents/offspring alive; retain losers for database history."""
-    survivors = {id(ind) for ind in population.best(sort="min", n=size)}
-    for individual in population:
-        individual.alive = id(individual) in survivors
+def mutate_population(offspring: Population, seed: int, generation: int) -> Population:
+    """Apply Gaussian mutation with matching draws across crossover conditions."""
+    set_seed(int(np.random.SeedSequence([seed, generation, 1]).generate_state(1)[0]))
+    for child in offspring:
+        child.genotype = FloatMutator.gaussian(
+            child.genotype, std=MUTATION_SD, mutation_probability=MUTATION_PROBABILITY)
+        child.requires_eval = True
+    return offspring
+
+
+def produce_offspring(population: Population, condition: str, seed: int, history: list) -> Population:
+    """Append mutated children while retaining parents for survivor selection."""
+    offspring = create_offspring(population, condition)
+    return population + mutate_population(offspring, seed, len(history))
+
+
+def select_survivors(population: Population) -> Population:
+    """Retain the best living parents/offspring and archive the rest as dead."""
+    for individual in population.alive.sort(sort="min")[POPULATION_SIZE:]:
+        individual.alive = False
     return population
 
 
-def run(args, evaluator: Evaluator, condition: str, seed: int) -> None:
-    """Run one condition/seed with a fixed budget and save settings and results."""
-    # Use a separate directory per run; refuse to overwrite previous results.
-    output = args.output / condition / f"seed_{seed}"
-    output.mkdir(parents=True, exist_ok=False)
-    settings = vars(args) | {
-        "output": str(output), "condition": condition, "seed": seed,
-        "body": "john_set.gecko", "spawn": SPAWN, "target": TARGET.tolist(),
-        "genotype_size": evaluator.size, "timestep": evaluator.model.opt.timestep,
-        "simulation_steps": evaluator.steps,
-    }
-    (output / "settings.json").write_text(json.dumps(settings, indent=2))
-    # Start every condition with the same evaluated population for this seed.
-    set_seed(seed)
-    random.seed(seed)
-    population = Population([
-        make_individual(FloatsGenerator.normal(std=0.5, size=evaluator.size))
-        for _ in range(args.population)
-    ])
-    evaluator.evaluate(population)
-    generation = 0
+# Recording and output
 
-    def reproduce(population: Population) -> Population:
-        """Create the offspring batch, mutate it, and combine it with the parents."""
-        children = Population([
-            make_individual(recombine(population, condition))
-            for _ in range(args.offspring)
-        ])
-        # Match mutation draws across conditions independently of crossover draws.
-        set_seed(int(np.random.SeedSequence([seed, generation, 1]).generate_state(1)[0]))
-        for child in children:
-            child.genotype = FloatMutator.gaussian(
-                child.genotype, std=args.mutation_std,
-                mutation_probability=args.mutation_probability,
-            )
-        return population + children
-
-    # Each generation: select/recombine/mutate, evaluate, then retain survivors.
-    operations = [
-        EAOperation(reproduce), EAOperation(evaluator.evaluate),
-        EAOperation(select_survivors, args.population),
-    ]
-    ea = EA(population, operations, is_maximisation=False, quiet=True,
-            db_file_path=output / "population.db", db_handling="halt")
-    try:
-        with (output / "history.csv").open("w", newline="") as stream:
-            writer = csv.writer(stream)
-            writer.writerow(["generation", "evaluations", "best", "mean", "std", "worst"])
-            # Include generation zero; statistics describe the surviving population.
-            for generation in range(args.generations + 1):
-                if generation:
-                    ea.step()
-                ea.fetch_population()
-                fitness = np.array([ind.fitness for ind in ea.population.alive])
-                writer.writerow([
-                    generation, args.population + generation * args.offspring,
-                    fitness.min(), fitness.mean(), fitness.std(), fitness.max(),
-                ])
-                stream.flush()
-                print(f"{condition} seed={seed} generation={generation} best={fitness.min():.4f}", flush=True)
-        # Export the winning controller separately for later replay.
-        best = ea.population.alive.best(sort="min")[0]
-        (output / "best.json").write_text(json.dumps({
-            "fitness": best.fitness, "weights": best.genotype,
-        }))
-    finally:
-        ea.engine.dispose()
+def record_generation(population: Population, history: list) -> Population:
+    """Append survivor statistics, starting with generation zero."""
+    fitness = np.array([ind.fitness for ind in population.alive])
+    history.append(dict(generation=len(history), evaluations=POPULATION_SIZE + len(history) * OFFSPRING_SIZE,
+                        best=float(fitness.min()), mean=float(fitness.mean()),
+                        std=float(fitness.std()), worst=float(fitness.max())))
+    return population
 
 
-def plot_results(output: Path) -> None:
-    """TODO: plot mean and standard deviation across independent seed runs."""
-    raise NotImplementedError
+def get_run_directory(seed: int, condition: str) -> Path:
+    """Return the output location for one seed and crossover condition."""
+    return RESULTS_DIR / condition / f"seed_{seed}"
 
+
+def save_run_results(population: Population, model: mj.MjModel, seed: int, condition: str, history: list) -> None:
+    """Save run settings, generation statistics, and the best controller."""
+    directory = get_run_directory(seed, condition)
+    best = population.alive.best(sort="min")[0]
+    settings = dict(seed=seed, condition=condition, population=POPULATION_SIZE, offspring=OFFSPRING_SIZE,
+                    generations=NUM_GENERATIONS, hidden=HIDDEN_SIZE, duration=SIM_DURATION,
+                    mutation_std=MUTATION_SD, mutation_probability=MUTATION_PROBABILITY,
+                    init_std=INIT_SD, body="john_set.gecko", spawn=SPAWN, target=TARGET.tolist(),
+                    genotype_size=len(best.genotype), timestep=model.opt.timestep,
+                    simulation_steps=int(np.ceil(SIM_DURATION / model.opt.timestep)))
+    for name, payload in (("settings", settings), ("history", history),
+                          ("best", dict(fitness=best.fitness, weights=best.genotype))):
+        (directory / f"{name}.json").write_text(json.dumps(payload, indent=2))
+    with (directory / "history.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(history[0]))
+        writer.writeheader()
+        writer.writerows(history)
+
+
+# Plotting
+
+def load_histories_for_condition(condition: str):
+    """Load all configured seed histories for one crossover condition."""
+    return [np.genfromtxt(get_run_directory(seed, condition) / "history.csv",
+                          delimiter=",", names=True, ndmin=1) for seed in SEEDS]
+
+
+def plot_results() -> None:
+    """Plot matching seed histories; runs must share the same generation budget."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    output, conditions, seeds = RESULTS_DIR, CONDITIONS, SEEDS
+    results, final_rows = {}, []
+    for condition in conditions:
+        histories = load_histories_for_condition(condition)
+        values = np.array([np.column_stack((h["mean"], h["best"])) for h in histories])
+        results[condition] = (values.mean(axis=0), values.std(axis=0))
+        average, spread = results[condition]
+        final_rows.append({
+            "condition": condition, "seeds": len(histories),
+            "average_final_fitness": float(average[-1, 0]),
+            "best_final_fitness": float(average[-1, 1]),
+            "average_final_fitness_std": float(spread[-1, 0]),
+            "best_final_fitness_std": float(spread[-1, 1]),
+        })
+
+    # Include generation zero to show the common initial population.
+    generations = histories[0]["generation"]
+    labels = {c: "No crossover" if c == "none" else c.replace("_", " ").capitalize()
+              for c in conditions}
+    titles = ("Average population fitness", "Best population fitness")
+    ylabel = "Distance to target (m)\n(lower is better)"
+    note = f"Mean ± SD across {len(seeds)} seeds"
+
+    def save(figure, path):
+        """Lay out, save, and close a figure."""
+        figure.tight_layout()
+        figure.savefig(output / path, dpi=150)
+        plt.close(figure)
+
+    with plt.rc_context(PLOT_STYLE):
+        for condition, (average, spread) in results.items():
+            figure, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+            for i, axis in enumerate(axes):
+                axis.plot(generations, average[:, i])
+                axis.fill_between(generations, average[:, i] - spread[:, i],
+                                  average[:, i] + spread[:, i], alpha=0.2)
+                axis.set(ylabel=ylabel, title=titles[i])
+                axis.grid(alpha=0.25)
+            axes[-1].set_xlabel("Generation")
+            figure.suptitle(f"{labels[condition]}\n{note}")
+            save(figure, Path(condition) / "fitness_by_generation.png")
+
+        for i, metric in enumerate(("average", "best")):
+            figure, axis = plt.subplots(figsize=(11, 7))
+            for condition, (average, spread) in results.items():
+                line, = axis.plot(generations, average[:, i], label=labels[condition])
+                axis.fill_between(generations, average[:, i] - spread[:, i],
+                                  average[:, i] + spread[:, i], color=line.get_color(), alpha=0.12)
+            axis.set(xlabel="Generation", ylabel=ylabel, title=f"{titles[i]}\n{note}")
+            axis.grid(alpha=0.25)
+            axis.legend()
+            save(figure, f"{metric}_fitness_all_conditions.png")
+
+        figure, axis = plt.subplots(figsize=(12, 7))
+        x, width = np.arange(len(conditions)), 0.38
+        for i, metric in enumerate(("average", "best")):
+            axis.bar(x + (i - 0.5) * width,
+                     [row[f"{metric}_final_fitness"] for row in final_rows], width,
+                     yerr=[row[f"{metric}_final_fitness_std"] for row in final_rows],
+                     capsize=4, label=titles[i])
+        axis.set_xticks(x, [labels[c].replace(" ", "\n", 1) for c in conditions])
+        axis.set(ylabel=ylabel, title=f"Final fitness by crossover condition\n{note}")
+        axis.grid(axis="y", alpha=0.25)
+        axis.set_axisbelow(True)
+        axis.legend()
+        save(figure, "final_fitness_by_condition.png")
+
+    with (output / "final_fitness_by_condition.csv").open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(final_rows[0]))
+        writer.writeheader()
+        writer.writerows(final_rows)
+    (output / "final_fitness_by_condition.json").write_text(json.dumps(final_rows, indent=2))
+
+
+# Run the experiment
 
 def main() -> None:
-    """Validate CLI settings and run every requested condition for each seed."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--conditions", nargs="+", choices=CONDITIONS, default=list(CONDITIONS))
-    parser.add_argument("--seeds", nargs="+", type=int, default=list(range(5)))
-    parser.add_argument("--population", type=int, default=20)
-    parser.add_argument("--offspring", type=int, default=20)
-    parser.add_argument("--generations", type=int, default=100)
-    parser.add_argument("--duration", type=float, default=15.0)
-    parser.add_argument("--hidden", type=int, default=6)
-    parser.add_argument("--mutation-std", type=float, default=0.1)
-    parser.add_argument("--mutation-probability", type=float, default=0.1)
-    parser.add_argument("--output", type=Path, default=Path(__file__).parent / "results")
-    args = parser.parse_args()
-    if (args.population < 2 or args.offspring < 1 or args.generations < 0
-            or args.hidden < 1 or not np.isfinite(args.duration) or args.duration <= 0
-            or not np.isfinite(args.mutation_std) or args.mutation_std < 0
-            or not 0 <= args.mutation_probability <= 1 or min(args.seeds) < 0):
-        parser.error("Invalid population, budget, controller, mutation, or seed settings.")
-    if len(set(args.seeds)) != len(args.seeds) or len(set(args.conditions)) != len(args.conditions):
-        parser.error("Seeds and conditions must be unique.")
-    evaluator = Evaluator(args.hidden, args.duration)
-    for seed in args.seeds:
-        for condition in args.conditions:
-            run(args, evaluator, condition, seed)
+    """Run every seed/condition, then generate the comparison graphs."""
+    if not PLOT_ONLY:
+        model = build_model()
+        for seed in SEEDS:
+            for condition in CONDITIONS:
+                directory = get_run_directory(seed, condition)
+                directory.mkdir(parents=True, exist_ok=False)
+                seed_operators(seed)
+                population = initialise_pop(model)
+                evaluate_population(population, model)
+                history = []
+                record_generation(population, history)
+                operations = [EAOperation(produce_offspring, condition, seed, history),
+                              EAOperation(evaluate_population, model), EAOperation(select_survivors),
+                              EAOperation(record_generation, history)]
+                ea = EA(population, operations, is_maximisation=False, quiet=True,
+                        db_file_path=directory / "population.db", db_handling="halt")
+                try:
+                    for generation in range(1, NUM_GENERATIONS + 1):
+                        ea.step()
+                        print(f"{condition} seed={seed} generation={generation} best={history[-1]['best']:.4f}", flush=True)
+                    ea.fetch_population()
+                    save_run_results(ea.population, model, seed, condition, history)
+                finally:
+                    ea.engine.dispose()
+    plot_results()
 
 
 if __name__ == "__main__":
