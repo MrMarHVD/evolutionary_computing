@@ -1,4 +1,10 @@
-"""EC A2 template code - neuroevolution for targeted locomotion with ARIEL.
+"""EC A2 solution - neuroevolution for targeted locomotion with ARIEL.
+
+CURRENT IMPLEMENTATION
+----------------------
+The original template guidance below is retained for reference. This file now
+trains, checkpoints and replays an evolved MLP using a custom EA on ariel.ec.
+Use --help for training settings; --search-mode focused adds sparse refinement.
 
 WHAT THIS FILE IS
 -----------------
@@ -52,7 +58,7 @@ from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.john_set import snake
 from ariel.ec import set_seed
 from ariel.ec import EA, EAOperation, Individual, Population
-from ariel.simulation.environments import SimpleFlatWorld
+from ariel.simulation.environments import BaseWorld, SimpleFlatWorld
 from ariel.simulation.environments import OlympicArena
 from ariel.utils.noise_gen import PerlinNoise
 from ariel.utils.renderers import single_frame_renderer, video_renderer
@@ -62,34 +68,129 @@ from ariel.utils.video_recorder import VideoRecorder
 # Type aliases
 type ViewerTypes = Literal["launcher", "video", "simple", "frame", "no_control"]
 
-# --- RANDOM GENERATOR SETUP --- #
-# Fix the seed while you are debugging.
-# Report results over MULTIPLE seeds.
-SEED = 42
+# ============================================================================ #
+#  EDITABLE SETTINGS
+# ============================================================================ #
+# Edit these before launching Python. Command-line options override their defaults.
+# On --resume, saved run settings are inherited unless explicitly overridden by a
+# command-line option. Keep the task/controller settings fixed when replaying a brain.
+# Numbers that define the algorithm's structure (e.g. two parents, XY coordinates,
+# bias inputs and file schema versions) stay with the code that uses them.
+
+# --- Task: randomness, body, world and starting pose --- #
+SEED = 42  # Seed for a single run and the direct random-controller demo.
+SEEDS = [SEED]  # Independent training seeds; e.g. [42, 43, 44, 45, 46] (--seeds).
+BODY_FACTORY = snake  # Body constructor, without (); e.g. snake or gecko.
+WORLD_FACTORY = OlympicArena  # World constructor, without (); e.g. OlympicArena.
+WORLD_KWARGS = {"load_precompiled": False}  # Constructor options for the selected world.
+TERRAIN_SEED = 2026  # Fixed OlympicArena terrain; independent of the evolutionary seed.
+SPAWN_POS: list[float] = [0.0, 0.0, 0.1]  # Initial core X/Y/Z in metres.
+SPAWN_ROTATION = [0, 0, 180]  # Initial roll/pitch/yaw in degrees; snake faces the target.
+CORRECT_SPAWN_COLLISION = True  # Lift the body if it initially intersects the floor.
+TARGET_POSITION: list[float] = [4.0, 0.0, 2.0]  # Target X/Y/Z; fitness uses only X/Y.
+SIM_DURATION: float = 15.0  # Simulated seconds per candidate (--duration).
+TARGET_RADIUS = 0.1  # Final XY distance in metres labelled successful (--target-radius).
+BAD_FITNESS = 1_000_000.0  # Score assigned only to numerically invalid simulations.
+SIMULATION_CHUNK_STEPS = 50  # Physics steps between validity checks/trajectory samples.
+
+# --- Neural controller and initial weight distribution --- #
+HIDDEN_SIZE: int = 8  # Hidden-layer neurons; changes the chromosome length.
+INITIAL_WEIGHT_SIGMA = 0.5  # Standard deviation of zero-mean initial/random-search weights.
+WEIGHT_LIMIT = 5.0  # Clip evolved and random-search weights to +/- this value.
+CLOCK_FREQUENCIES = (0.75, 1.5)  # Clock inputs in Hz; each adds a sine and cosine input.
+POSITION_INPUT_SCALE = np.pi  # Clip orientation/joint observations to +/- scale, then divide.
+VELOCITY_INPUT_SCALE = 5.0  # Divide velocities by this before applying tanh.
+TARGET_INPUT_SCALE = 2.0  # Divide the XY target gap by this many metres before tanh.
+FORWARD_X_SIGN = -1.0  # Body forward is core-local -X for snake; use +1 for local +X.
+ACTION_ANGLE_LIMIT = np.pi / 2  # Maximum magnitude of direct hinge commands in radians.
+
+# --- Evolution and stopping rules (also available as command-line options) --- #
+POPULATION_SIZE = 32  # Survivors retained AND new candidates per generation (--population).
+GENERATIONS = 150  # Maximum offspring generations; additional on resume (--generations).
+WORKERS = min(4, os.cpu_count() or 1)  # Parallel evaluation processes; 1 runs locally (--workers).
+ALGORITHM = "ea"  # "ea" evolves parents; "random" samples independently (--algorithm).
+SEARCH_MODE = "standard"  # "standard", "mixed", "focused" or experimental "adaptive" (--search-mode).
+TOURNAMENT_SIZE = 3  # Random contestants per parent-selection tournament (--tournament).
+CROSSOVER_RATE = 0.2  # Chance of crossover when the selected category permits (--crossover-rate).
+MUTATION_RATE = 0.1  # Per-gene mutation chance, except focused fine edits (--mutation-rate).
+MUTATION_SIGMA = 0.15  # Standard deviation of Gaussian mutation noise (--mutation-sigma).
+PATIENCE = 30  # Generations without significant improvement; 0 disables stopping (--patience).
+MIN_IMPROVEMENT = 0.0001  # Improvement in metres required to reset patience (--min-improvement).
+RUN_BASELINE = False  # Also run random search at the EA's actual evaluation budget (--baseline).
+CROSSOVER_GENE_PROBABILITY = 0.5  # Chance of taking each gene from the second parent.
+MUTATION_SCALES = (0.2, 1.0, 3.0)  # Noise multipliers sampled in mixed/focused modes.
+MUTATION_SCALE_PROBABILITIES = (0.6, 0.3, 0.1)  # Matching category probabilities; must sum to 1.
+FINE_MUTATION_THRESHOLD = 1.0  # Scales below this skip crossover and use focused single-gene edits.
+ADAPTIVE_SIGMA_MIN = 0.002  # Smallest per-parent mutation sigma in adaptive search.
+ADAPTIVE_SIGMA_MAX = 0.5  # Largest per-parent mutation sigma in adaptive search.
+ADAPTIVE_SIGMA_TAU = 0.7  # Log-normal change strength for inherited mutation sigma.
+
+# --- Files and workflow --- #
+DATA = Path(__file__).resolve().parent / "__data__" / Path(__file__).stem  # Default results folder.
+OUTPUT_DIR = None  # Optional custom training folder (--output-dir); None uses DATA.
+REPLAY = None  # None trains; "latest" or a brain JSON path replays (--replay).
+RESUME = None  # None starts fresh; "latest" or a saved run/checkpoint continues (--resume).
+NO_VIEW = False  # Skip the interactive winner replay when True (--no-view).
+EXPORT_VIDEO = False  # Also save best_replay.mp4 and its starting PNG (--video).
+MODE: ViewerTypes = "launcher"  # Direct run_experiment() only: launcher/video/simple/frame/no_control.
+
+# --- Target markers, camera, replay and exported figures --- #
+TARGET_POLE_HEIGHT = 0.3  # Pole centre Z and half-height in metres (base at Z=0).
+TARGET_POLE_RADIUS = 0.018  # Visual target pole radius in metres; never collides.
+TARGET_POLE_COLOR = [1, 0.12, 0.12, 0.8]  # Pole RGBA colour.
+TARGET_BALL_HEIGHT = 0.62  # Target ball centre Z in metres.
+TARGET_BALL_RADIUS = 0.07  # Visual target ball radius in metres; never collides.
+TARGET_BALL_COLOR = [1, 0.85, 0.05, 1]  # Ball RGBA colour.
+CAMERA_LOOKAT = [0.65, 0, 0.1]  # Camera focus point in world coordinates.
+CAMERA_DISTANCE = 5.5  # Camera distance from its focus point in metres.
+CAMERA_AZIMUTH = 90  # Horizontal camera angle in degrees.
+CAMERA_ELEVATION = -42  # Vertical camera angle in degrees.
+VIEWER_CHUNK_STEPS = 10  # Physics steps between interactive display updates.
+REPLAY_HOLD_SECONDS = 2.0  # Hold the final pose this long in the viewer and exported video.
+VIEWER_POLL_SECONDS = 0.02  # Delay between window updates while holding the final pose.
+VIDEO_FPS = 25  # Exported video frames per second.
+VIDEO_SIZE = (960, 640)  # Exported video (width, height) in pixels.
+VIDEO_CODEC = "mp4v"  # Four-character OpenCV video codec.
+VIDEO_TEXT_POSITIONS = ((18, 28), (18, 54))  # Pixel origins for the two video caption lines.
+VIDEO_TEXT_SCALE = 0.6  # OpenCV caption font scale.
+VIDEO_TEXT_COLORS = ((255, 255, 255), (255, 235, 80))  # Caption colours in OpenCV BGR order.
+VIDEO_TEXT_THICKNESS = 1  # Caption stroke width in pixels.
+PLOT_SIZE = (8, 4.5)  # Convergence figure size in inches.
+PLOT_DPI = 160  # Resolution of the saved convergence PNG.
+PLOT_SPREAD_ALPHA = 0.2  # Opacity of the standard-deviation band.
+PLOT_GRID_ALPHA = 0.25  # Opacity of convergence-plot grid lines.
+
+# --- Derived paths and runtime state (not experiment settings) --- #
 RNG = np.random.default_rng(SEED)
-
-# ariel.ec's own generators/mutators/crossover draw from a separate,
-# package-level RNG. Reseed it too if you build your EA on ariel.ec,
-# or every one of your "multiple seeds" runs the same variation operators.
-set_seed(SEED)
-
-# --- DATA SETUP --- #
-SCRIPT_NAME = Path(__file__).stem
-CWD = Path(__file__).resolve().parent  # Save beside the assignment, regardless of launch folder.
-DATA = CWD / "__data__" / SCRIPT_NAME
+set_seed(SEED)  # ARIEL has a separate package-level random generator.
 DATA.mkdir(parents=True, exist_ok=True)
-
-# --- EXPERIMENT CONSTANTS --- #
-SPAWN_POS: list[float] = [0.0, 0.0, 0.1]  # where the robot starts
-TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up
-SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
-MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
+LATEST_BRAIN = DATA / "latest_best.json"
+_WORKER_MODEL = None
+_WORKER_DATA = None
 
 
 # ============================================================================ #
 #  1. THE BODY AND THE WORLD
 # ============================================================================ #
-def build_world() -> SimpleFlatWorld:
+class _SeededOlympicArena(OlympicArena):
+    """Assignment-local terrain generator; the ARIEL source stays unchanged.
+
+    OlympicArena constructs PerlinNoise() without a seed. Reproduce its existing
+    heightmap formula with an explicit seed so independent EA runs share a task.
+    """
+
+    def _generate_heightmap(self):
+        size = self.rugged_resolution
+        noise = PerlinNoise(seed=TERRAIN_SEED).as_grid(
+            size, size, scale=self.rugged_hillyness, normalize=False,
+        )
+        u, v = np.meshgrid(np.linspace(0, 1, size), np.linspace(0, 1, size), indexing="xy")
+        distance = np.minimum.reduce([u, 1 - u, v, 1 - v])
+        t = np.clip(distance / getattr(self, "edge_width", 0.1), 0.1, 1.0)
+        return noise * t * t * (3 - 2 * t)
+
+
+def build_world() -> BaseWorld:
     """Create the environment the robot lives in.
 
     YOU MAY CHANGE THIS. Options include: SimpleFlatWorld, RuggedTerrainWorld,
@@ -100,20 +201,21 @@ def build_world() -> SimpleFlatWorld:
     other, and say in your report which one you used. A controller evolved on
     flat ground and one evolved on rugged terrain are not comparable numbers.
     """
-    # Regenerate with a fixed terrain seed instead of trusting an optional cache.
-    world = SimpleFlatWorld(load_precompiled=False)
+    # Constructor options belong with WORLD_FACTORY in EDITABLE SETTINGS.
+    factory = _SeededOlympicArena if WORLD_FACTORY is OlympicArena else WORLD_FACTORY
+    world = factory(**WORLD_KWARGS)
     # These visual-only geometries cannot push the snake or alter its fitness.
     # The red pole and yellow ball mark the target's exact X/Y coordinates.
     world.spec.worldbody.add_geom(
         name="target_pole", type=mj.mjtGeom.mjGEOM_CYLINDER,
-        pos=[TARGET_POSITION[0], TARGET_POSITION[1], 0.3],
-        size=[0.018, 0.3, 0.0], rgba=[1, 0.12, 0.12, 0.8],
+        pos=[TARGET_POSITION[0], TARGET_POSITION[1], TARGET_POLE_HEIGHT],
+        size=[TARGET_POLE_RADIUS, TARGET_POLE_HEIGHT, 0.0], rgba=TARGET_POLE_COLOR,
         contype=0, conaffinity=0,
     )
     world.spec.worldbody.add_geom(
         name="target_ball", type=mj.mjtGeom.mjGEOM_SPHERE,
-        pos=[TARGET_POSITION[0], TARGET_POSITION[1], 0.62],
-        size=[0.07, 0, 0], rgba=[1, 0.85, 0.05, 1],
+        pos=[TARGET_POSITION[0], TARGET_POSITION[1], TARGET_BALL_HEIGHT],
+        size=[TARGET_BALL_RADIUS, 0, 0], rgba=TARGET_BALL_COLOR,
         contype=0, conaffinity=0,
     )
     return world
@@ -133,7 +235,7 @@ def build_robot() -> CoreModule:
     Change the body and your genotype length changes with it. Keep the body
     FIXED within an experiment.
     """
-    return snake()
+    return BODY_FACTORY()
 
 
 # ============================================================================ #
@@ -159,20 +261,11 @@ def build_robot() -> CoreModule:
 #
 # ============================================================================ #
 
-# Controller architecture - decide before writing your EA.
-HIDDEN_SIZE: int = 8
-
 # IMPLEMENTATION NOTE: the original template comments/docstrings are retained
 # as requested; references to a random-only demo describe the starting template.
 # main() now evolves a brain and opens its replay. The John Set body is fixed.
 # Clock inputs provide time information to the MLP, not a CPG controller or a
 # prescribed gait: every mapping from observations to joint actions is evolved.
-TERRAIN_SEED = 2026  # Independent of the EA seed: all brains see the same ground.
-WEIGHT_LIMIT = 5.0
-BAD_FITNESS = 1_000_000.0  # Only numerical failures; valid runs use plain XY distance.
-LATEST_BRAIN = DATA / "latest_best.json"
-_WORKER_MODEL = None
-_WORKER_DATA = None
 
 
 def nn_controller(
@@ -218,7 +311,7 @@ def nn_controller(
     outputs = np.tanh(np.append(layer1, 1.0) @ w2)  # in [-1, 1]
 
     # --- RESCALE TO THE HINGE RANGE --------------------------------------- #
-    return outputs * (np.pi / 2)  # in [-pi/2, pi/2]
+    return outputs * ACTION_ANGLE_LIMIT  # Direct desired angles in radians.
 
 
 def make_random_weights(
@@ -235,8 +328,8 @@ def make_random_weights(
     genotype back into these matrices is on you.
     """
     return [
-        RNG.normal(scale=0.5, size=(input_size, HIDDEN_SIZE)),
-        RNG.normal(scale=0.5, size=(HIDDEN_SIZE + 1, output_size)),
+        RNG.normal(scale=INITIAL_WEIGHT_SIGMA, size=(input_size, HIDDEN_SIZE)),
+        RNG.normal(scale=INITIAL_WEIGHT_SIGMA, size=(HIDDEN_SIZE + 1, output_size)),
     ]
 
 
@@ -308,8 +401,8 @@ def run_experiment(
     world.spawn(
         robot.spec,
         position=SPAWN_POS,
-        rotation=[0, 0, 180],  # Tail behind the core, on the starting platform.
-        correct_collision_with_floor=True,
+        rotation=SPAWN_ROTATION,
+        correct_collision_with_floor=CORRECT_SPAWN_COLLISION,
     )
 
     # Compile the world into a model. USE AS IS.
@@ -331,8 +424,15 @@ def run_experiment(
         # Direct calls replay the most recently evolved brain when available.
         if LATEST_BRAIN.exists():
             brain_path = Path(json.loads(LATEST_BRAIN.read_text())["brain"])
+            saved = json.loads(brain_path.read_text(encoding="utf-8"))
+            # The direct Python entry point must use the same archived physics
+            # as --replay, even after build_world() has been edited.
+            model = _archived_model(brain_path, saved)
+            data = mj.MjData(model)
+            mj.mj_resetData(model, data)
+            mj.mj_forward(model, data)
             weights = _load_brain(brain_path, model)
-            duration = json.loads(brain_path.read_text())["duration"]
+            duration = saved["duration"]
         else:
             weights = make_random_weights(input_size, output_size)
 
@@ -400,7 +500,7 @@ def run_experiment(
 
 
 def main() -> None:
-    """Run a single demo evaluation with a randomly-weighted controller."""
+    """Inspect controller dimensions and dispatch training, resume or replay."""
     # A quick look at the size of the problem you are about to search.
     mj.set_mjcb_control(None)
     world = build_world()
@@ -408,8 +508,8 @@ def main() -> None:
     world.spawn(
         robot.spec,
         position=SPAWN_POS,
-        rotation=[0, 0, 180],
-        correct_collision_with_floor=True,
+        rotation=SPAWN_ROTATION,
+        correct_collision_with_floor=CORRECT_SPAWN_COLLISION,
     )
     model = world.spec.compile()
     data = mj.MjData(model)
@@ -433,8 +533,8 @@ def _heading_features(data: mj.MjData) -> tuple[float, float]:
     # is local -X. MuJoCo stores the root quaternion in w, x, y, z order.
     # With our 180-degree spawn yaw, forward is world +X, toward the target.
     w, x, y, z = data.qpos[3:7]
-    forward_x = -(1.0 - 2.0 * (y * y + z * z))
-    forward_y = -2.0 * (x * y + w * z)
+    forward_x = FORWARD_X_SIGN * (1.0 - 2.0 * (y * y + z * z))
+    forward_y = FORWARD_X_SIGN * 2.0 * (x * y + w * z)
     target_x = TARGET_POSITION[0] - data.qpos[0]
     target_y = TARGET_POSITION[1] - data.qpos[1]
     scale = np.hypot(forward_x, forward_y) * np.hypot(target_x, target_y)
@@ -449,8 +549,8 @@ def _heading_features(data: mj.MjData) -> tuple[float, float]:
 
 
 def _input_size(model: mj.MjModel) -> int:
-    """State + target XY + four clock values + time + heading pair + bias."""
-    return model.nq - 3 + model.nv + 10
+    """State + target XY + clock pairs + time + heading pair + bias."""
+    return model.nq - 3 + model.nv + 2 * len(CLOCK_FREQUENCIES) + 6
 
 
 def _controller_inputs(data: mj.MjData, duration: float = SIM_DURATION) -> np.ndarray:
@@ -462,14 +562,14 @@ def _controller_inputs(data: mj.MjData, duration: float = SIM_DURATION) -> np.nd
     """
     if not np.isfinite(duration) or duration <= 0:
         raise ValueError("Controller duration must be finite and positive.")
-    phases = 2 * np.pi * data.time * np.array([0.75, 1.5])
+    phases = 2 * np.pi * data.time * np.asarray(CLOCK_FREQUENCIES)
     # Unlike the repeating clocks, elapsed time tells the brain how much of
     # this evaluation has passed. Training and replay pass the same duration.
     elapsed = np.clip(data.time / duration, 0.0, 1.0)
     return np.concatenate([
-        np.clip(data.qpos[3:], -np.pi, np.pi) / np.pi,
-        np.tanh(data.qvel / 5.0),
-        np.tanh((np.asarray(TARGET_POSITION[:2]) - data.qpos[:2]) / 2.0),
+        np.clip(data.qpos[3:], -POSITION_INPUT_SCALE, POSITION_INPUT_SCALE) / POSITION_INPUT_SCALE,
+        np.tanh(data.qvel / VELOCITY_INPUT_SCALE),
+        np.tanh((np.asarray(TARGET_POSITION[:2]) - data.qpos[:2]) / TARGET_INPUT_SCALE),
         np.sin(phases), np.cos(phases), [elapsed], _heading_features(data), [1.0],
     ])
 
@@ -508,8 +608,8 @@ def _simulate(model, data, weights, duration, *, trace=False):
     total = int(round(duration / model.opt.timestep))
     try:
         mj.set_mjcb_control(_control_callback)
-        for start in range(0, total, 50):
-            mj.mj_step(model, data, nstep=min(50, total - start))
+        for start in range(0, total, SIMULATION_CHUNK_STEPS):
+            mj.mj_step(model, data, nstep=min(SIMULATION_CHUNK_STEPS, total - start))
             # MuJoCo may auto-reset after an unstable step, so check warnings
             # as well as finite coordinates and the simulated clock.
             if (not np.all(np.isfinite(data.qpos))
@@ -557,7 +657,9 @@ def _evaluate_population(population: Population, pool, duration) -> Population:
     results = pool.map(_worker_evaluate, jobs) if pool else map(_worker_evaluate, jobs)
     for individual, (score, final, valid) in zip(pending, results, strict=True):
         individual.fitness = score
-        individual.tags = {"final_position": final, "valid": valid}
+        # Adaptive offspring carry their own mutation sigma into selection and
+        # checkpoints. Evaluation adds measurements without erasing that state.
+        individual.tags = {**individual.tags, "final_position": final, "valid": valid}
     return population
 
 
@@ -570,37 +672,91 @@ def _breed(population: Population, rng, args, length) -> Population:
     """
     parents = list(population.alive)
     for _ in range(args.population):
+        child_sigma = None
         if args.algorithm == "random":
-            genes = np.clip(rng.normal(0, 0.5, length), -WEIGHT_LIMIT, WEIGHT_LIMIT)
+            genes = np.clip(rng.normal(0, INITIAL_WEIGHT_SIGMA, length), -WEIGHT_LIMIT, WEIGHT_LIMIT)
+        elif getattr(args, "search_mode", "standard") == "adaptive":
+            # Self-adaptation: selection rewards both a useful brain and the
+            # mutation strength that produced it. No crossover breaks up the
+            # coordinated network. The sigma is strategy state, not a NN gene.
+            contestants = rng.integers(0, len(parents), size=args.tournament)
+            parent = min((parents[i] for i in contestants), key=lambda ind: ind.fitness)
+            parent_sigma = parent.tags.get("mutation_sigma", args.mutation_sigma)
+            child_sigma = float(np.clip(parent_sigma * np.exp(ADAPTIVE_SIGMA_TAU * rng.normal()),
+                                        ADAPTIVE_SIGMA_MIN, ADAPTIVE_SIGMA_MAX))
+            genes = np.asarray(parent.genotype).copy()
+            mask = rng.random(length) < args.mutation_rate
+            if not mask.any():
+                mask[rng.integers(length)] = True
+            genes[mask] += rng.normal(0, child_sigma, int(mask.sum()))
+            genes = np.clip(genes, -WEIGHT_LIMIT, WEIGHT_LIMIT)
+            if np.array_equal(genes, parent.genotype):
+                index = rng.integers(length)
+                direction = -1.0 if genes[index] >= 0 else 1.0
+                genes[index] = np.clip(genes[index] + direction * child_sigma,
+                                       -WEIGHT_LIMIT, WEIGHT_LIMIT)
         else:
             # Mixed scales spend most evaluations refining coordinated motion,
             # while retaining occasional larger changes to explore other gaits.
             # Standard mode preserves the original operator and RNG sequence.
-            scale = (float(rng.choice([0.2, 1.0, 3.0], p=[0.6, 0.3, 0.1]))
-                     if getattr(args, "search_mode", "standard") == "mixed" else 1.0)
+            mode = getattr(args, "search_mode", "standard")
+            scale = (float(rng.choice(MUTATION_SCALES, p=MUTATION_SCALE_PROBABILITIES))
+                     if mode in ("mixed", "focused") else 1.0)
             selected = []
             for _ in range(2):
                 contestants = rng.integers(0, len(parents), size=args.tournament)
                 selected.append(min((parents[i] for i in contestants),
                                     key=lambda individual: individual.fitness))
             genes = np.asarray(selected[0].genotype).copy()
-            if rng.random() < args.crossover_rate and scale >= 1.0:
-                mask = rng.random(length) < 0.5
+            if rng.random() < args.crossover_rate and scale >= FINE_MUTATION_THRESHOLD:
+                mask = rng.random(length) < CROSSOVER_GENE_PROBABILITY
                 genes[mask] = np.asarray(selected[1].genotype)[mask]
-            mask = rng.random(length) < args.mutation_rate
+            if mode == "focused" and scale < FINE_MUTATION_THRESHOLD:
+                # A good gait depends on coordinated weights. Fine offspring
+                # change just ONE weight, without recombining the network.
+                # The other 40% retain broader exploration of the search space.
+                mask = np.zeros(length, dtype=bool)
+                mask[rng.integers(length)] = True
+            else:
+                mask = rng.random(length) < args.mutation_rate
             genes[mask] += rng.normal(0, args.mutation_sigma * scale, int(mask.sum()))
             genes = np.clip(genes, -WEIGHT_LIMIT, WEIGHT_LIMIT)
-        population.append(_new_individual(genes))
+            if mode == "focused" and np.array_equal(genes, selected[0].genotype):
+                # An empty mask or clipping at the boundary can undo mutation.
+                # Spend this evaluation on an actual change, pointing inward
+                # if the selected weight is already at its allowed limit.
+                index = rng.integers(length)
+                delta = max(abs(rng.normal(0, args.mutation_sigma * scale)), 1e-12)
+                direction = -1.0 if genes[index] >= 0 else 1.0
+                genes[index] = np.clip(genes[index] + direction * delta,
+                                       -WEIGHT_LIMIT, WEIGHT_LIMIT)
+        child = _new_individual(genes)
+        if child_sigma is not None:
+            child.tags = {"mutation_sigma": child_sigma}
+        population.append(child)
     return population
 
 
-def _survive(population: Population, size) -> Population:
+def _survive(population: Population, size, unique=False) -> Population:
     """Elitist (mu + lambda) selection; lower distance always wins.
 
     Retain rejected candidates until ARIEL commits this generation so the
     SQLite archive contains every evaluated chromosome, including failures.
     """
     ranked = sorted(population.alive, key=lambda individual: individual.fitness)
+    if unique:
+        # Keep the best copy of each chromosome before filling spare slots
+        # with duplicates. Fitness remains the only ranking among unique brains,
+        # and the best-so-far controller is never lost.
+        seen, distinct, duplicates = set(), [], []
+        for individual in ranked:
+            key = tuple(individual.genotype)
+            if key in seen:
+                duplicates.append(individual)
+            else:
+                seen.add(key)
+                distinct.append(individual)
+        ranked = distinct + duplicates
     for individual in ranked[size:]:
         individual.alive = False
     return population
@@ -613,14 +769,40 @@ def _atomic_json(path, payload):
     temporary.replace(path)
 
 
+def _body_name():
+    """Derive the archive label from the selected constructor."""
+    return f"{BODY_FACTORY.__module__.rsplit('.', 1)[-1]}.{BODY_FACTORY.__name__}"
+
+
+def _controller_settings():
+    """Settings that affect the meaning of a saved chromosome, not just its size."""
+    return {"clock_frequencies": list(CLOCK_FREQUENCIES),
+            "position_input_scale": POSITION_INPUT_SCALE,
+            "velocity_input_scale": VELOCITY_INPUT_SCALE,
+            "target_input_scale": TARGET_INPUT_SCALE,
+            "forward_x_sign": FORWARD_X_SIGN, "action_angle_limit": ACTION_ANGLE_LIMIT}
+
+
 def _metadata(model, args, seed, model_path):
     return {
-        "schema": 3, "body": "john_set.snake", "world": _world_name(model),
-        "terrain_seed": TERRAIN_SEED if model.nhfield else None, "spawn": SPAWN_POS,
-        "rotation_degrees": [0, 0, 180], "target": TARGET_POSITION,
+        "schema": 3, "body": _body_name(), "world": _world_name(model),
+        "terrain_seed": (TERRAIN_SEED if WORLD_FACTORY is OlympicArena
+                         and not WORLD_KWARGS.get("load_precompiled", True) else None),
+        "terrain_generation": ("seeded_perlin" if WORLD_FACTORY is OlympicArena
+                               and not WORLD_KWARGS.get("load_precompiled", True) else "factory_defined"),
+        "spawn": SPAWN_POS,
+        "rotation_degrees": SPAWN_ROTATION, "target": TARGET_POSITION,
         "duration": args.duration, "hidden_size": HIDDEN_SIZE,
         "input_size": _input_size(model), "output_size": model.nu,
-        "controller": "tanh MLP with biases, state/target/0.75Hz+1.5Hz clock/elapsed time/heading sine+cosine",
+        "controller": "tanh MLP with biases, state/target/clock/elapsed time/heading sine+cosine",
+        "controller_settings": _controller_settings(),
+        "variation_settings": {"initial_weight_sigma": INITIAL_WEIGHT_SIGMA,
+            "weight_limit": WEIGHT_LIMIT, "crossover_gene_probability": CROSSOVER_GENE_PROBABILITY,
+            "mutation_scales": list(MUTATION_SCALES),
+            "mutation_scale_probabilities": list(MUTATION_SCALE_PROBABILITIES),
+            "fine_mutation_threshold": FINE_MUTATION_THRESHOLD,
+            "adaptive_sigma_min": ADAPTIVE_SIGMA_MIN, "adaptive_sigma_max": ADAPTIVE_SIGMA_MAX,
+            "adaptive_sigma_tau": ADAPTIVE_SIGMA_TAU},
         "control": "direct angle commands every physics step",
         "fitness": "final XY Euclidean distance (metres), minimised",
         "timestep": model.opt.timestep, "seed": seed,
@@ -704,6 +886,11 @@ def _record_generation(ea, generation, evaluations, run_dir, metadata, history):
     genes = np.asarray([individual.genotype for individual in alive])
     row["mean_gene_std"] = float(genes.std(axis=0).mean())
     row["unique_genotypes"] = int(len(np.unique(genes, axis=0)))
+    if (metadata["settings"].get("search_mode") == "adaptive"
+            and metadata["settings"]["algorithm"] == "ea"):
+        row["mean_mutation_sigma"] = float(np.mean([
+            ind.tags.get("mutation_sigma", metadata["settings"]["mutation_sigma"]) for ind in alive
+        ]))
     first_row = not history
     history.append(row)
     with (run_dir / "history.csv").open("a", newline="", encoding="utf-8") as stream:
@@ -730,9 +917,16 @@ def _train(model, args, seed, run_dir, pool, model_path):
     started = time.perf_counter()
     start_generation, inherited_evaluations = 0, 0
     state = getattr(args, "_continuation", None)
+    adaptive_changed = bool(state and getattr(args, "search_mode", "standard") == "adaptive" and (
+        state["metadata"]["settings"].get("search_mode") != "adaptive"
+        or state["metadata"]["settings"]["mutation_sigma"] != args.mutation_sigma
+        or any(state["metadata"].get("variation_settings", {}).get(key) != value for key, value in (
+            ("adaptive_sigma_min", ADAPTIVE_SIGMA_MIN), ("adaptive_sigma_max", ADAPTIVE_SIGMA_MAX),
+            ("adaptive_sigma_tau", ADAPTIVE_SIGMA_TAU)))
+    ))
     if state is None:
         population = Population([
-            _new_individual(np.clip(rng.normal(0, 0.5, length), -WEIGHT_LIMIT, WEIGHT_LIMIT))
+            _new_individual(np.clip(rng.normal(0, INITIAL_WEIGHT_SIGMA, length), -WEIGHT_LIMIT, WEIGHT_LIMIT))
             for _ in range(args.population)
         ])
         _evaluate_population(population, pool, args.duration)
@@ -744,6 +938,10 @@ def _train(model, args, seed, run_dir, pool, model_path):
             individual = _new_individual(record["genotype"])
             individual.fitness = record["fitness"]
             individual.tags = record["tags"]
+            if adaptive_changed:
+                # An explicit strategy change starts from the requested sigma;
+                # unchanged adaptive resumes preserve each inherited sigma.
+                individual.tags = {"mutation_sigma": args.mutation_sigma}
             population.append(individual)
         if len(population) != args.population:
             raise ValueError("Continuation must keep the saved population size")
@@ -754,12 +952,24 @@ def _train(model, args, seed, run_dir, pool, model_path):
     operations = [
         EAOperation(_breed, rng, args, length),
         EAOperation(_evaluate_population, pool, args.duration),
-        EAOperation(_survive, args.population),
+        EAOperation(_survive, args.population,
+                    getattr(args, "search_mode", "standard") in ("focused", "adaptive")
+                    and args.algorithm == "ea"),
     ]
     ea = EA(population, operations, num_steps=args.generations,
             is_maximisation=False, first_generation_id=start_generation, quiet=True,
             db_file_path=run_dir / "evolution.sqlite", db_handling="halt")
     metadata = _metadata(model, args, seed, model_path)
+    if state:
+        # Resume uses the archived model, even if today's world settings differ.
+        # Old files recorded TERRAIN_SEED despite never applying it; do not
+        # relabel that old geometry as the newly seeded arena.
+        for key in ("body", "world", "spawn", "rotation_degrees", "target", "timestep"):
+            if key in state["metadata"]:
+                metadata[key] = state["metadata"][key]
+        metadata["terrain_generation"] = state["metadata"].get("terrain_generation", "legacy_unknown")
+        metadata["terrain_seed"] = (state["metadata"].get("terrain_seed")
+                                    if metadata["terrain_generation"] == "seeded_perlin" else None)
     metadata["continuation"] = {
         "source": str(args.resume) if state else None,
         "start_generation": start_generation, "inherited_evaluations": inherited_evaluations,
@@ -772,9 +982,9 @@ def _train(model, args, seed, run_dir, pool, model_path):
     previous_best = state["previous_best"] if state else best.fitness
     # An intentional operator change begins a new patience window, so a previous
     # plateau cannot prematurely terminate the new refinement experiment.
-    if state and any(state["metadata"]["settings"].get(key, "standard" if key == "search_mode" else None)
+    if state and (adaptive_changed or any(state["metadata"]["settings"].get(key, "standard" if key == "search_mode" else None)
                      != getattr(args, key) for key in
-                     ("search_mode", "mutation_rate", "mutation_sigma", "crossover_rate", "tournament")):
+                     ("search_mode", "mutation_rate", "mutation_sigma", "crossover_rate", "tournament"))):
         last_improvement, previous_best = start_generation, best.fitness
     _save_checkpoint(ea, rng, metadata, evaluations, previous_best, last_improvement, run_dir)
     stop_reason = "generation budget"
@@ -824,7 +1034,7 @@ def _load_brain(path, model):
     # Legacy schema 1 mislabeled every world as OlympicArena. Its archived model
     # checksum, not that label, identifies the terrain. New files use the model name.
     # Schema 3 adds elapsed time and heading; older input layouts are rejected.
-    expected = {"body": "john_set.snake", "target": TARGET_POSITION,
+    expected = {"body": _body_name(), "target": TARGET_POSITION,
                 "spawn": SPAWN_POS, "hidden_size": HIDDEN_SIZE,
                 "input_size": _input_size(model),
                 "output_size": model.nu, "timestep": model.opt.timestep}
@@ -833,16 +1043,31 @@ def _load_brain(path, model):
     for key, value in expected.items():
         if saved.get(key) != value:
             raise ValueError(f"Checkpoint {key}={saved.get(key)!r}; expected {value!r}")
+    # Older schema-3 brains used these fixed values without storing them.
+    legacy_controller = {"clock_frequencies": [0.75, 1.5],
+                         "position_input_scale": np.pi, "velocity_input_scale": 5.0,
+                         "target_input_scale": 2.0, "forward_x_sign": -1.0,
+                         "action_angle_limit": np.pi / 2}
+    if saved.get("controller_settings", legacy_controller) != _controller_settings():
+        raise ValueError("Checkpoint controller settings differ; restore the saved settings to replay/resume.")
     return _decode(saved["genotype"], model)
+
+
+def _archived_model(brain_path, saved):
+    """Load the physics saved with a brain after checking its exact contents."""
+    archived_model = Path(brain_path).parent.parent / "model.mjb"
+    if hashlib.sha256(archived_model.read_bytes()).hexdigest() != saved["model_sha256"]:
+        raise ValueError("Saved model checksum does not match the brain.")
+    return mj.MjModel.from_binary_path(str(archived_model))
 
 
 def _camera():
     """Keep the snake and target together in view, with the stadium behind."""
     camera = mj.MjvCamera()
-    camera.lookat[:] = [0.65, 0, 0.1]
-    camera.distance = 5.5
-    camera.azimuth = 90
-    camera.elevation = -42
+    camera.lookat[:] = CAMERA_LOOKAT
+    camera.distance = CAMERA_DISTANCE
+    camera.azimuth = CAMERA_AZIMUTH
+    camera.elevation = CAMERA_ELEVATION
     return camera
 
 
@@ -868,18 +1093,18 @@ def _interactive_replay(model, data, weights, duration):
                 mj.mj_forward(model, data)
                 mj.set_mjcb_control(_control_callback)
                 start_time = time.perf_counter()
-                for step in range(0, total, 10):
+                for step in range(0, total, VIEWER_CHUNK_STEPS):
                     if not window.is_running():
                         return
-                    mj.mj_step(model, data, nstep=min(10, total - step))
+                    mj.mj_step(model, data, nstep=min(VIEWER_CHUNK_STEPS, total - step))
                     window.sync()
                     time.sleep(max(0, start_time + data.time - time.perf_counter()))
                 print(f"Replay final distance: {fitness_function(None, get_core_position(data)):.6f} m",
                       flush=True)
-                hold_until = time.perf_counter() + 2
+                hold_until = time.perf_counter() + REPLAY_HOLD_SECONDS
                 while window.is_running() and time.perf_counter() < hold_until:
                     window.sync()
-                    time.sleep(0.02)
+                    time.sleep(VIEWER_POLL_SECONDS)
     finally:
         mj.set_mjcb_control(None)
 
@@ -897,14 +1122,14 @@ def _export_video(model, weights, duration, output):
     def _control_callback(m, d):
         d.ctrl[:] = nn_controller(m, d, weights, duration)
 
-    fps = 25
+    fps = VIDEO_FPS
     frame_steps = int(round(1 / fps / model.opt.timestep))
     total = int(round(duration / model.opt.timestep))
-    writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*"mp4v"), fps, (960, 640))
+    writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*VIDEO_CODEC), fps, VIDEO_SIZE)
     if not writer.isOpened():
         raise RuntimeError(f"Cannot create video: {output}")
     try:
-        with mj.Renderer(model, height=640, width=960) as renderer:
+        with mj.Renderer(model, height=VIDEO_SIZE[1], width=VIDEO_SIZE[0]) as renderer:
             mj.set_mjcb_control(_control_callback)
             previous_step = 0
             # Include the exact final state even for durations between frames.
@@ -918,13 +1143,15 @@ def _export_video(model, weights, duration, output):
                     Image.fromarray(frame).save(output.with_suffix(".png"))
                 bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 distance = fitness_function(None, get_core_position(data))
-                cv2.putText(bgr, f"Evolved John Set snake | {_world_name(model)} | t={data.time:.1f}s",
-                            (18, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText(bgr, f"Evolved {_body_name()} | {_world_name(model)} | t={data.time:.1f}s",
+                            VIDEO_TEXT_POSITIONS[0], cv2.FONT_HERSHEY_SIMPLEX, VIDEO_TEXT_SCALE,
+                            VIDEO_TEXT_COLORS[0], VIDEO_TEXT_THICKNESS, cv2.LINE_AA)
                 cv2.putText(bgr, f"Target: yellow ball / red pole | distance {distance:.3f} m",
-                            (18, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 235, 80), 1, cv2.LINE_AA)
+                            VIDEO_TEXT_POSITIONS[1], cv2.FONT_HERSHEY_SIMPLEX, VIDEO_TEXT_SCALE,
+                            VIDEO_TEXT_COLORS[1], VIDEO_TEXT_THICKNESS, cv2.LINE_AA)
                 writer.write(bgr)
             # Hold the final pose for readability without extending the evaluation.
-            for _ in range(fps * 2):
+            for _ in range(round(fps * REPLAY_HOLD_SECONDS)):
                 writer.write(bgr)
     finally:
         writer.release()
@@ -937,7 +1164,7 @@ def _plot_histories(histories, output, world_name="selected world"):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axis = plt.subplots(figsize=(8, 4.5))
+    fig, axis = plt.subplots(figsize=PLOT_SIZE)
     for algorithm in sorted({name for name, _ in histories}):
         runs = [rows for name, rows in histories if name == algorithm]
         # Avoid extrapolating plateau-stopped runs into unevaluated budgets.
@@ -948,45 +1175,69 @@ def _plot_histories(histories, output, world_name="selected world"):
         spread = values.std(axis=0, ddof=1) if len(runs) > 1 else np.zeros(common)
         axis.plot(budgets, mean, label=f"{algorithm} (n={len(runs)})")
         if len(runs) > 1:
-            axis.fill_between(budgets, mean - spread, mean + spread, alpha=0.2)
+            axis.fill_between(budgets, mean - spread, mean + spread, alpha=PLOT_SPREAD_ALPHA)
     axis.set(xlabel="Evaluated controllers", ylabel="Best final distance (m; lower is better)",
-             title=f"Snake brain evolution in {world_name}")
-    axis.grid(alpha=0.25)
+             title=f"{_body_name()} brain evolution in {world_name}")
+    reference = histories[0][1]
+    if len(reference) > 1:
+        evaluations_per_generation = (
+            (reference[1]["evaluations"] - reference[0]["evaluations"])
+            / (reference[1]["generation"] - reference[0]["generation"])
+        )
+        offset = reference[0]["evaluations"] - evaluations_per_generation * reference[0]["generation"]
+        # Show the assignment's generation axis as well as the fair-budget
+        # axis, but only when every plotted run uses the same relationship.
+        if all(np.isclose(row["evaluations"], offset + evaluations_per_generation * row["generation"])
+               for _, rows in histories for row in rows):
+            generation_axis = axis.secondary_xaxis(
+                "top", functions=(lambda budget: (budget - offset) / evaluations_per_generation,
+                                  lambda generation: offset + generation * evaluations_per_generation),
+            )
+            generation_axis.set_xlabel("Generation")
+    axis.grid(alpha=PLOT_GRID_ALPHA)
     axis.legend()
     fig.tight_layout()
-    fig.savefig(output, dpi=160)
+    fig.savefig(output, dpi=PLOT_DPI)
     plt.close(fig)
 
 
 def _cli(model):
     """One command for training, multi-seed studies, or saved-brain replay."""
-    parser = argparse.ArgumentParser(description="Evolve a John Set snake brain in the selected world.")
+    parser = argparse.ArgumentParser(description=f"Evolve a {_body_name()} brain in the selected world.")
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--replay", nargs="?", const="latest", help="Replay a brain JSON, or latest.")
     action.add_argument("--resume", nargs="?", const="latest",
                         help="Continue the latest or specified saved population; generations are additional.")
-    parser.add_argument("--population", type=int, default=32)
-    parser.add_argument("--generations", type=int, default=60, help="Maximum offspring generations.")
-    parser.add_argument("--seeds", type=int, nargs="+", default=[SEED])
+    parser.add_argument("--population", type=int, default=POPULATION_SIZE)
+    parser.add_argument("--generations", type=int, default=GENERATIONS, help="Maximum offspring generations.")
+    parser.add_argument("--seeds", type=int, nargs="+", default=SEEDS)
     parser.add_argument("--duration", type=float, default=SIM_DURATION)
-    parser.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1))
-    parser.add_argument("--mutation-rate", type=float, default=0.1)
-    parser.add_argument("--mutation-sigma", type=float, default=0.15)
-    parser.add_argument("--crossover-rate", type=float, default=0.2)
-    parser.add_argument("--search-mode", choices=["standard", "mixed"], default="standard",
-                        help="Mixed mode combines fine (0.2x), normal (1x), and large (3x) mutations.")
-    parser.add_argument("--target-radius", type=float, default=0.1,
+    parser.add_argument("--workers", type=int, default=WORKERS)
+    parser.add_argument("--mutation-rate", type=float, default=MUTATION_RATE)
+    parser.add_argument("--mutation-sigma", type=float, default=MUTATION_SIGMA)
+    parser.add_argument("--crossover-rate", type=float, default=CROSSOVER_RATE)
+    parser.add_argument("--search-mode", choices=["standard", "mixed", "focused", "adaptive"], default=SEARCH_MODE,
+                        help="Adaptive inherits mutation strength per brain and skips crossover; other modes use fixed scales.")
+    parser.add_argument("--target-radius", type=float, default=TARGET_RADIUS,
                         help="Report success within this final XY distance; does not change fitness.")
-    parser.add_argument("--output-dir", help="Optional separate results folder for comparison runs.")
-    parser.add_argument("--tournament", type=int, default=3)
-    parser.add_argument("--patience", type=int, default=15,
+    parser.add_argument("--output-dir", default=OUTPUT_DIR, help="Optional separate results folder for comparison runs.")
+    parser.add_argument("--tournament", type=int, default=TOURNAMENT_SIZE)
+    parser.add_argument("--patience", type=int, default=PATIENCE,
                         help="Stop after this many generations without improvement; 0 disables.")
-    parser.add_argument("--min-improvement", type=float, default=0.0001)
-    parser.add_argument("--algorithm", choices=["ea", "random"], default="ea")
-    parser.add_argument("--baseline", action="store_true", help="Run random search at each EA's actual budget.")
-    parser.add_argument("--no-view", action="store_true", help="Do not open the interactive replay.")
-    parser.add_argument("--video", action="store_true", help="Also export best_replay.mp4.")
+    parser.add_argument("--min-improvement", type=float, default=MIN_IMPROVEMENT)
+    parser.add_argument("--algorithm", choices=["ea", "random"], default=ALGORITHM)
+    parser.add_argument("--baseline", action="store_true", default=RUN_BASELINE,
+                        help="Run random search at each EA's actual budget.")
+    parser.add_argument("--no-view", action="store_true", default=NO_VIEW,
+                        help="Do not open the interactive replay.")
+    parser.add_argument("--video", action="store_true", default=EXPORT_VIDEO,
+                        help="Also export best_replay.mp4.")
     args = parser.parse_args()
+    # An explicit replay/resume flag takes precedence over both file defaults.
+    if args.replay is None and args.resume is None:
+        args.replay, args.resume = REPLAY, RESUME
+    if args.replay and args.resume:
+        parser.error("Set only one of REPLAY and RESUME, or choose one on the command line.")
     if args.resume:
         if args.baseline:
             parser.error("A continued population is not a fresh equal-budget baseline comparison.")
@@ -1034,6 +1285,14 @@ def _cli(model):
             or not 0 <= args.mutation_rate <= 1 or not 0 <= args.crossover_rate <= 1
             or any(seed < 0 for seed in args.seeds) or len(set(args.seeds)) != len(args.seeds)):
         parser.error("Invalid population, budget, seeds, duration, workers, or variation settings.")
+    if (args.algorithm == "ea" and args.search_mode in ("focused", "adaptive")
+            and (args.mutation_sigma <= 0 or args.mutation_rate <= 0)):
+        parser.error("Focused/adaptive search requires positive mutation sigma and rate.")
+    if args.search_mode == "adaptive" and (
+        not all(np.isfinite(value) for value in (ADAPTIVE_SIGMA_MIN, ADAPTIVE_SIGMA_MAX, ADAPTIVE_SIGMA_TAU))
+        or not 0 < ADAPTIVE_SIGMA_MIN <= ADAPTIVE_SIGMA_MAX or ADAPTIVE_SIGMA_TAU < 0
+    ):
+        parser.error("Adaptive sigma bounds must be positive and ordered; tau must be finite and nonnegative.")
     if not np.isclose(args.duration / model.opt.timestep,
                       round(args.duration / model.opt.timestep), atol=1e-8, rtol=0):
         parser.error("Duration must be a multiple of the physics timestep (0.002 seconds).")
@@ -1042,10 +1301,7 @@ def _cli(model):
                  if args.replay == "latest" else Path(args.replay).resolve())
         saved = json.loads(brain.read_text(encoding="utf-8"))
         # Use the archived binary to reproduce the precise ground and model.
-        archived_model = brain.parent.parent / "model.mjb"
-        if hashlib.sha256(archived_model.read_bytes()).hexdigest() != saved["model_sha256"]:
-            raise ValueError("Saved model checksum does not match the brain.")
-        model = mj.MjModel.from_binary_path(str(archived_model))
+        model = _archived_model(brain, saved)
         weights = _load_brain(brain, model)
         score, _, valid = _simulate(model, mj.MjData(model), weights, saved["duration"])
         if not valid or not np.isclose(score, saved["fitness"], atol=1e-9, rtol=0):
