@@ -72,7 +72,7 @@ FITNESS_CSV = DATA / "fitness_data" / f"fitness.csv"
 SPAWN_POS: list[float] = [0.0, 0.0, 0.1]  # where the robot starts
 #TARGET_POSITION: list[float] = [2.0, 0.0, 0.1]  # where it should end up
 TARGET_POSITION: list[float] = [5.5, 0.0, 0.1]
-SIM_DURATION: float = 40.0  # seconds of simulated time per evaluation
+SIM_DURATION: float = 15.0  # seconds of simulated time per evaluation
 MODE: ViewerTypes = "launcher"  # see run_experiment() for the options
 
 
@@ -485,16 +485,16 @@ def run_experiment(genome: list[float], mode: ViewerTypes = MODE) -> float:
     return fitness
 
 POPULATION_SIZE = 100
-GENERATIONS = 30
-OFFSPRING_SIZE = 30
-TOURNAMENT_SIZE = 3
+GENERATIONS = 100
+OFFSPRING_SIZE = 50
+TOURNAMENT_SIZE = 5
 
-MUTATION_RATE = 0.6
-MUTATION_SIGMA = 0.08
+MUTATION_RATE = 0.4
+MUTATION_SIGMA = 0.25
 WEIGHT_LIMIT = 3.0
 
-CROSSOVER_PROBABILITY = 0.5
-SWAP_PROBABILITY = 0.5
+CROSSOVER_PROBABILITY = 0.6
+SWAP_PROBABILITY = 0.225
 
 def make_individual(input_size: int, output_size: int) -> Individual:
     individual = Individual()
@@ -592,8 +592,8 @@ def mutate(population: Population) -> Population:
             dtype=np.float64
         ).copy()
 
-        rate = MUTATION_RATE if RNG.random() < 0.25 else 0.10
-        mutation_mask = RNG.random(genome.size) < rate
+        #rate = MUTATION_RATE if RNG.random() < 0.25 else 0.10
+        mutation_mask = RNG.random(genome.size) < MUTATION_RATE
         number_of_mutations = int(np.count_nonzero(mutation_mask))
 
         genome[mutation_mask] += RNG.normal(
@@ -639,8 +639,18 @@ def plot_fitness_from_csv() -> None:
     figure.savefig(DATA / f"fitness_seed_{SEED}.png", dpi=150)
     plt.close(figure)
 
-def main() -> None:
+def main(seed: int = 42, render_best: bool = True) -> float:
     """Run a single demo evaluation with a randomly-weighted controller."""
+    global SEED, RNG, DATA, FITNESS_CSV
+
+    SEED = seed
+    RNG = np.random.default_rng(seed)
+    set_seed(seed)
+
+    run_id = datetime.now().strftime("%Y-%m-%d_%H-%M_%S_%f")
+    DATA = CWD / "__data__" / SCRIPT_NAME / f"seed_{seed}_{run_id}"
+    FITNESS_CSV = DATA / "fitness_data" / "fitness.csv"
+
     # A quick look at the size of the problem you are about to search.
     DATA.mkdir(parents=True, exist_ok=False)
 
@@ -705,15 +715,60 @@ def main() -> None:
     )
     ea.run()
     save_fitness_csv(history)
-    plot_fitness_from_csv()
-
     best_individual = ea.get_solution("best", only_alive=False)
-    best_genome = cast(list[float], best_individual.genotype)
-    console.log(
-        f"Best individual: {best_individual.id}, "
-        f"fitness={best_individual.fitness:.4f}"
-    )
-    run_experiment(best_genome, mode="video")
+
+    if render_best:
+        plot_fitness_from_csv()
+        best_genome = cast(list[float], best_individual.genotype)
+        run_experiment(best_genome, mode="video")
+
+    return float(best_individual.fitness)
+
+def optimize(n_trials: int = 20):
+    import optuna
+
+    def objective(trial):
+        global MUTATION_RATE, MUTATION_SIGMA, TOURNAMENT_SIZE
+        global CROSSOVER_PROBABILITY, SWAP_PROBABILITY
+
+        MUTATION_RATE = trial.suggest_float(
+            "MUTATION_RATE", 0.10,0.90
+        )
+
+        MUTATION_SIGMA = trial.suggest_float(
+            "MUTATION_SIGMA", 0.005, 0.30, log=True
+        )
+
+        TOURNAMENT_SIZE = trial.suggest_int(
+            "TOURNAMENT_SIZE", 2, 6
+        )
+
+        CROSSOVER_PROBABILITY = trial.suggest_float(
+            "CROSSOVER_PROBABILITY", 0.0, 1.0
+        )
+
+        SWAP_PROBABILITY = trial.suggest_float(
+            "SWAP_PROBABILITY", 0.10, 0.90
+        )
+
+        scores = []
+        for seed in (1124, 8487, 7):
+            try:
+                scores.append(main(seed=seed, render_best=True))
+            finally:
+                mj.set_mjcb_control(None)
+
+        trial.set_user_attr("seed_scores", scores)
+        return float(np.mean(scores))
+
+    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=42))
+    study.optimize(objective, n_trials=n_trials, n_jobs=1)
+    globals().update(study.best_params)
+
+    print("Best parameters: ", study.best_params)
+    print("Best mean fitness: ", study.best_value)
+
+    return study
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -723,11 +778,16 @@ if __name__ == "__main__":
         type=Path,
         metavar="CSV"
     )
+    parser.add_argument("--optuna", action="store_true")
+    parser.add_argument("--trials", type=int, default=20)
+
     args = parser.parse_args()
     if args.plot_only is not None:
         FITNESS_CSV = args.plot_only
         DATA = FITNESS_CSV.parent.parent
         plot_fitness_from_csv()
+    elif args.optuna:
+        optimize(n_trials=args.trials)
     else:
         main()
 
