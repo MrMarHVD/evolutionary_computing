@@ -35,6 +35,7 @@ import mujoco as mj
 import numpy as np
 import numpy.typing as npt
 from mujoco import viewer
+from networkx.classes import number_of_nodes
 
 # Local libraries (ARIEL)
 from ariel import console
@@ -585,15 +586,40 @@ def crossover(population: Population) -> Population:
         population.extend([child_a, child_b])
     return population
 
-def mutate(population: Population) -> Population:
+def mutate(population: Population, variation=False, variation_probability: float = 0.25) -> Population:
+    if variation:
+        return mutate_variation(population, variation_probability)
+    else:
+        return mutate_normal(population)
+
+def mutate_normal(population: Population) -> Population:
     for individual in population.unevaluated:
         genome = np.asarray(
             cast(list[float], individual.genotype),
             dtype=np.float64
         ).copy()
 
-        #rate = MUTATION_RATE if RNG.random() < 0.25 else 0.10
         mutation_mask = RNG.random(genome.size) < MUTATION_RATE
+        number_of_mutations = int(np.count_nonzero(mutation_mask))
+
+        genome[mutation_mask] += RNG.normal(
+            loc=0.0,
+            scale=MUTATION_SIGMA,
+            size=number_of_mutations
+        )
+
+        genome = np.clip(genome, -WEIGHT_LIMIT, WEIGHT_LIMIT)
+        individual.genotype = genome.tolist()
+    return population
+
+def mutate_variation(population: Population, variation_probability: float = 0.25) -> Population:
+    for individual in population.unevaluated:
+        genome = np.asarray(
+            cast(list[float], individual.genotype),
+            dtype=np.float64
+        ).copy()
+
+        mutation_mask = RNG.random(genome.size) < variation_probability
         number_of_mutations = int(np.count_nonzero(mutation_mask))
 
         genome[mutation_mask] += RNG.normal(
@@ -639,8 +665,35 @@ def plot_fitness_from_csv() -> None:
     figure.savefig(DATA / f"fitness_seed_{SEED}.png", dpi=150)
     plt.close(figure)
 
-def main(seed: int = 42, render_best: bool = True) -> float:
-    """Run a single demo evaluation with a randomly-weighted controller."""
+VARIATION_VALUES = (0.0, 0.25, 0.5, 0.75, 1.0)
+EXPERIMENT_SEEDS = (42, 7, 1124, 8486, 2026)
+
+def run_mutation_experiment(values=VARIATION_VALUES, seeds=EXPERIMENT_SEEDS) -> None:
+    experiment_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
+    experiment_dir = (
+        CWD / "__data__" / SCRIPT_NAME / "mutation_experiments"
+        / f"experiment_{experiment_id}"
+    )
+    experiment_dir.mkdir(parents=True, exist_ok=False)
+
+    for probability in values:
+        for seed in seeds:
+            try:
+                main(
+                    seed=seed,
+                    render_best=True,
+                    variation=True,
+                    variation_probability=probability,
+                    output_dir=(
+                        experiment_dir
+                        / f"mutation_{probability}"
+                        / f"seed_{seed}"
+                    )
+                )
+            finally:
+                mj.set_mjcb_control(None)
+
+def main(seed: int = 42, render_best: bool = True, variation: bool = False, variation_probability: float = 0.25, output_dir: Path | None = None) -> float:
     global SEED, RNG, DATA, FITNESS_CSV
 
     SEED = seed
@@ -648,7 +701,11 @@ def main(seed: int = 42, render_best: bool = True) -> float:
     set_seed(seed)
 
     run_id = datetime.now().strftime("%Y-%m-%d_%H-%M_%S_%f")
-    DATA = CWD / "__data__" / SCRIPT_NAME / f"seed_{seed}_{run_id}"
+    DATA = (
+        Path(output_dir)
+        if output_dir is not None
+        else CWD / "__data__" / SCRIPT_NAME / f"seed_{seed}_{run_id}"
+    )
     FITNESS_CSV = DATA / "fitness_data" / "fitness.csv"
 
     # A quick look at the size of the problem you are about to search.
@@ -696,10 +753,16 @@ def main(seed: int = 42, render_best: bool = True) -> float:
 
     initial_population = record_generation(evaluate(initial_population))
 
+    def mutate_for_run(population: Population) -> Population:
+        return mutate(
+            population,
+            variation=variation,
+            variation_probability=variation_probability)
+
     operations: list[EAOperation] = [
         EAOperation(parent_selection),
         EAOperation(crossover),
-        EAOperation(mutate),
+        EAOperation(mutate_for_run),
         EAOperation(evaluate),
         EAOperation(survivor_selection),
         EAOperation(record_generation)
@@ -781,6 +844,14 @@ if __name__ == "__main__":
     parser.add_argument("--optuna", action="store_true")
     parser.add_argument("--trials", type=int, default=20)
 
+    parser.add_argument("--mutation-experiments", action="store_true")
+    parser.add_argument(
+        "--experiment-values", type=float, nargs="+", default=VARIATION_VALUES,
+    )
+    parser.add_argument(
+        "--experiment-seeds", type=int, nargs="+", default=EXPERIMENT_SEEDS,
+    )
+
     args = parser.parse_args()
     if args.plot_only is not None:
         FITNESS_CSV = args.plot_only
@@ -788,6 +859,11 @@ if __name__ == "__main__":
         plot_fitness_from_csv()
     elif args.optuna:
         optimize(n_trials=args.trials)
+    elif args.mutation_experiments:
+        run_mutation_experiment(
+            values=args.experiment_values,
+            seeds=args.experiment_seeds
+        )
     else:
         main()
 
