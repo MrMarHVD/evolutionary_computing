@@ -1,0 +1,34 @@
+{
+  "seed": 43,
+  "algorithm": "ea",
+  "fitness": 6.076972230662839,
+  "valid": true,
+  "evaluations": 12,
+  "stop_reason": "generation budget",
+  "new_evaluations": 12,
+  "generation": 2,
+  "training_minutes": 0.011584238333064907,
+  "reached_target": false,
+  "task_status": {
+    "distance_3d": 6.076972230662839,
+    "distance_xy": 6.061762297315724,
+    "core_height": 0.07531483259382862,
+    "fallen": false,
+    "on_terrain": true,
+    "terrain_contact": true,
+    "terrain_height": 7.450555727928077e-10,
+    "core_clearance": 0.07531483184877305,
+    "terrain_geom": "floor",
+    "elapsed_seconds": 0.20000000000000015,
+    "final_position": [
+      0.008240062693305914,
+      -0.005348983264423123,
+      0.07531483259382862
+    ],
+    "valid": true
+  },
+  "target_radius": 0.1,
+  "brain": "D:\\Masters\\EVOLUTIONARY_COMPUTING\\evolutionary_computing\\assignments\\assignment_2\\mutation_studies\\smoke_final_20261002\\runs\\uniform_step_p0.1_s0.05_seed_43\\attempt_000\\run\\best_brain.json",
+  "replay_verified": true,
+  "plotting_minutes": 0.013419675000477582
+}

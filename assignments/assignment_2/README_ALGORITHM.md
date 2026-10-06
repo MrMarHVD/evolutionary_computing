@@ -1,5 +1,32 @@
 # Assignment 2: how our robot-brain algorithm works
 
+The current mutation-only experiment is documented in
+[README_mutation_study.md](README_mutation_study.md). It fixes all non-mutation
+settings, uses five paired seeds and random search, and saves comparison graphs
+and videos. The guide below describes the general trainer, including legacy
+search modes that are excluded from the controlled study. Videos now default
+on and the interactive viewer requires `--view`.
+
+## Short summary
+
+- **What evolves:** 360 weights of a neural network controlling the fixed John
+  Set snake. The body stays fixed; movement is learned through evolution.
+- **Task:** approach the centre of OlympicArena's last platform, approximately
+  `(6.07, 0, 0.505)` m, within 15 simulated seconds on reproducible terrain.
+- **Fitness:** minimise final 3D core-to-target distance, with a 100-point
+  fall/off-terrain penalty. Success additionally requires physical terrain
+  contact and a final 3D gap of at most 0.10 m.
+- **Evolution:** tournament selection, optional uniform crossover, Gaussian
+  mutation and elitist survival. Defaults are 32 parents plus 32 children,
+  with up to 150 offspring generations and plateau stopping.
+- **Evidence:** a replayable brain and passing implementation checks establish
+  correct execution. They do not establish good navigation. Final comparisons
+  need at least five independent seeds, matched evaluation budgets and a baseline.
+- **Review fixes, 2 October 2026:** numerical failures now produce usable failed-run
+  records and count in failure statistics. A separate comparison plot/CSV shows
+  cross-seed mean and sample SD. Existing fitness and training defaults are retained.
+
+
 This guide explains the implementation in
 [A2_template_2026.py](A2_template_2026.py). It describes what the program actually
 does, why the main choices matter, and how to run and interpret an experiment.
@@ -33,41 +60,41 @@ its controller.
 
 ## 1. The task and what can change
 
-The task is to move the robot's core close to a target within a fixed amount of
-simulated time.
+The task is to move the robot's core close to a fixed target within a fixed
+amount of simulated time.
 
 | Part | Current setup |
 |---|---|
-| Robot | The prebuilt `john_set.snake`, with eight actuated hinges |
-| World | `OlympicArena`, regenerated with terrain seed 2026 |
-| Starting XY position | `(0, 0)` metres |
-| Starting orientation | 180 degrees of yaw, so the tail is behind the core and forward points toward world +X |
-| Target XY position | `(2, 0)` metres |
-| Time available per trial | 15 simulated seconds |
-| Physics timestep | 0.002 seconds: 500 steps per simulated second |
-| Score to minimise | Final core-to-target distance in the XY plane |
-| Reported success radius | 0.10 m by default |
+| Robot | Prebuilt `john_set.snake`, with eight actuated hinges |
+| World | OlympicArena, regenerated with terrain seed 2026 |
+| Starting XY | `(0, 0)` m |
+| Starting orientation | 180 degrees of yaw; forward points toward world +X |
+| Target XYZ | Centre of the top of `finish_end`, approximately `(6.07, 0, 0.505)` m |
+| Trial duration | 15 simulated seconds |
+| Physics and control | 0.002 s per step, or 500 Hz |
+| Fitness | Final 3D core-to-target distance plus a fall/off-terrain penalty |
+| Success | Final 3D gap at most 0.10 m, no fall, above terrain and in physical contact |
 | Evolved values | 360 neural-network weights, including biases |
 
-The nominal spawn is `[0, 0, 0.1]`. The world builder corrects the height to avoid
-starting inside the floor, so the actual initial core height can differ from
-0.1 m. The distance score uses X and Y only.
+The nominal spawn is `[0, 0, 0.1]`. Collision correction adjusts its height;
+the compiled model contains the actual starting pose. The target is derived
+from the final platform's top surface when the world is built. Set
+`TARGET_ON_FINAL_PLATFORM = False` to use a manual target for a different experiment.
 
-The red pole and yellow ball show the target. They have collisions disabled,
-so they cannot push or obstruct the robot. The controller receives the target
-coordinates directly; it does not need to identify the marker in a camera image.
+The red pole and yellow ball mark the target. They cannot collide with the robot.
+The brain receives target coordinates directly, without a camera or image recognition.
 
-The body, world, network architecture, clock frequencies and scoring rule are
-fixed within a run. Changing a mutation setting changes **how we search for a
-brain**, while changing the body or fitness changes the problem being solved.
+Body, terrain, target, architecture and objective stay fixed within a comparison.
+Changing mutation changes the search; changing these task settings changes the
+problem. The assignment's default metric is planar distance, but it permits a
+different clearly justified metric. Our 3D and fall-aware metric distinguishes
+the raised finish platform from falling underneath it. Describe that choice in
+the report; historical planar results cannot be compared directly with it.
 
-The arena has flat, rugged and inclined sections. The selected target is still
-at `(2, 0)`; changing worlds does not automatically move it to the finish line.
-The assignment-local `_SeededOlympicArena` uses the same heightmap formula as
-ARIEL's arena, but passes `TERRAIN_SEED` into its Perlin-noise generator. This
-fixes the earlier behaviour where a new launch silently generated new ground.
-No files in `src/ariel` are changed. Archived brains still replay on their own
-saved model, including models generated before this fix.
+The assignment-local `_SeededOlympicArena` reproduces ARIEL's heightmap formula
+with an explicit Perlin-noise seed. Independent search seeds therefore share
+the same terrain. Replay uses each archive's exact saved model. The evolutionary
+search is implemented through `ariel.ec`; it uses no black-box optimiser or CPG.
 
 ## 2. The two loops in the program
 
@@ -344,7 +371,7 @@ has made that child worse. The parent is still eligible to survive. If another
 child scores 0.30 m, it can improve the population's best result.
 
 Keeping the best available individual is **elitism**. It means the best saved
-distance cannot get worse from one completed generation to the next in this
+fitness cannot get worse from one completed generation to the next in this
 deterministic search. It does not mean that every child improves.
 
 Rejected individuals are marked dead, then stored with the rest of the
@@ -359,53 +386,65 @@ generator state. It then checks whether to stop or create the next generation.
 
 ## 7. How a trial is simulated and scored
 
-`_simulate()` performs the same procedure for each candidate:
+`_simulate()` applies the same evaluation to every candidate:
 
-1. Clear any previous MuJoCo control callback.
-2. Reset the simulation data and initialise the model state.
-3. Attach this candidate's neural-network controller.
-4. Run the required number of physics steps.
-5. Read the final core position and calculate its distance to the target.
-6. Clear the callback again, including when a numerical failure occurs.
+1. Clear the previous controller, reset all simulation data, and initialise state.
+2. Attach the candidate's neural network as the physics-step controller.
+3. Advance the requested number of physics steps, checking numerical validity
+   and falls every 50 steps.
+4. Read the final core position, inspect terrain support, and calculate fitness.
+5. Clear the callback in `finally`, including after a failed trial.
 
-At the defaults, a trial contains `15 / 0.002 = 7,500` physics steps. The
-controller supplies commands at the physics update rate. The code advances
-physics in chunks of 50 steps for monitoring; that does **not** reduce the
-controller to one update every 50 steps.
+A default trial contains `15 / 0.002 = 7,500` physics steps. The callback runs
+every physics step. Chunks of 50 only batch monitoring and trajectory samples;
+they do not lower the control rate to 10 Hz.
 
-The score is:
-
-```text
-fitness = sqrt((final_x - 2)^2 + final_y^2)
-```
-
-For example, finishing at XY `(1.6, 0.3)` gives:
+The current objective is fitness version 2:
 
 ```text
-sqrt((1.6 - 2)^2 + 0.3^2) = sqrt(0.16 + 0.09) = 0.5 metres
+distance_3d = sqrt((final_x - target_x)^2
+                 + (final_y - target_y)^2
+                 + (final_z - target_z)^2)
+
+fitness = distance_3d + (100 if fallen or not on_terrain else 0)
 ```
 
-A brain finishing 0.2 m from the target beats one finishing 0.8 m away.
-Zero is the ideal score, but the search is not guaranteed to find it.
+`fitness_function()` calculates the distance; `_score_state()` adds the penalty.
+The target is on the platform surface. A supported core exactly above its
+centre at Z = 0.580 m has a 0.075 m gap to the target at Z = 0.505 m. Zero is the
+mathematical distance minimum; this does not imply that zero is physically
+attainable by the robot's core.
 
-Important consequences of this particular objective:
+Terrain support has an explicit meaning in the code:
 
-- Only the **final** position matters. Reaching the target earlier and then
-  moving away can still produce a poor score.
-- Height does not appear in the score. Jumping higher is not itself progress.
-- There is no explicit energy, smoothness, path-length or falling penalty.
-- The reference point is the core, rather than the whole body's centre of mass.
-- The starting position is passed to `fitness_function()` but is not used in
-  its current formula. The task keeps the start fixed instead.
+- A downward ray under the core finds static collidable terrain. Robot geometry
+  and the decorative markers are excluded.
+- Core clearance must be between -0.02 m and +0.25 m relative to that surface.
+- `fallen` means core Z has dropped more than 0.25 m below its actual spawn Z.
+  Such trials stop at the next monitoring boundary, instead of continuing to
+  drift during free fall. Viewer and video use the same fall-check boundaries.
+- `terrain_contact` records an actual robot/terrain contact within 0.001 m.
 
-`--target-radius 0.1` labels a completed run successful when its final distance
-is at most 0.10 m. It does not change the fitness formula, end a trial early,
-or automatically stop evolution as soon as a successful brain appears.
+`on_terrain` is a clearance check; it does not itself guarantee physical contact.
+An airborne core close to the terrain can pass it. The 100-point penalty follows
+the formula above, while **success additionally requires `terrain_contact`**.
+The success test also requires numerical validity, no fall, and fitness at most
+`--target-radius`, default 0.10 m. This checks final support, rather than a
+sustained hold or every body segment resting on the finish platform.
 
-Numerically invalid simulations receive `BAD_FITNESS = 1,000,000`. The code
-checks finite positions/actions, relevant MuJoCo numerical warnings, and the
-elapsed simulated time. This large value is an error score, not a separate
-penalty for an otherwise valid robot moving badly.
+Only the final position is rewarded. Visiting the target and then moving away
+can score poorly. There are no explicit energy, smoothness, path-length or
+arrival-speed terms. The core is the reference point, and initial position is
+unused by the distance function because the experiment fixes the start.
+Success is a reported label; it does not stop evolution or end a valid trial early.
+
+Numerical failures receive `BAD_FITNESS = 1,000,000`, separately from physical
+task failures. Checks cover finite actions/state, MuJoCo warnings and the expected
+simulated clock. Missing or non-finite measurements are stored as JSON `null`,
+never NaN/Infinity. A fully invalid population still saves history, checkpoints
+and a failed result. Verification must reproduce both score and validity:
+`replay_verified: true` can therefore describe a reproducible failure, and must
+be read together with `valid` and `reached_target`. Invalid brains skip animation.
 
 ## 8. The four search modes
 
@@ -465,10 +504,9 @@ Two different chromosomes can still produce almost the same movement. The
 best brain remains protected, although a worse distinct brain can take a slot
 that would otherwise go to another copy of a better one.
 
-Focused mode is experimental. The earlier review's short pilots did not show
-better average performance than standard search. Its presence is an option for
-testing a hypothesis, not a promise of stronger brains. See
-[REVIEW.md](REVIEW.md) for those dated comparisons.
+Focused mode is experimental. Its mechanisms are implemented and tested;
+better performance on this task requires a comparison over independent seeds.
+It provides an option for testing a search hypothesis.
 
 ### Adaptive
 
@@ -513,9 +551,8 @@ The motivation is that a fixed noise scale may be too disruptive when refining
 an existing gait. This remains a search heuristic, not a guarantee of progress.
 Comparing it with standard search tests a package of changes: inherited sigma,
 no crossover, guaranteed mutation and duplicate-aware survival.
-The [29 September comparison](#olympicarena-checks-on-29-september-2026) did not
-show a consistent advantage, so adaptive mode is experimental and standard
-remains the default.
+Adaptive mode remains experimental. Its mechanisms are implemented and tested;
+this does not establish that it beats standard search on the current task.
 
 ## 9. Stopping rules and evaluation budgets
 
@@ -524,15 +561,16 @@ Training stops at the first applicable condition:
 - The maximum number of additional offspring generations has been completed.
 - The configured number of generations has passed without a sufficiently
   large improvement in the best score.
+- An optional `--max-minutes` training budget has expired. The current generation
+  finishes before checkpointing; final plots and winner verification add some time.
 
 For a fresh run, the built-in defaults are `--generations 150`, `--patience 30`
 and `--min-improvement 0.0001`.
 
-The earlier 60-generation cap and 15-generation patience stopped the latest
-OlympicArena run with 1.3734 m remaining. Continuing that exact saved population
-with standard search found further improvements, so the defaults now allow a
-longer search before treating a quiet period as a plateau. This increases the
-possible runtime and evaluation budget; it does not make each evaluation better.
+These defaults are a starting configuration, not a measured optimum. A larger
+budget allows more search; it does not improve the scoring of each candidate.
+The tuner can also impose a wall-clock deadline and pause at a completed
+generation boundary, with population and RNG state already checkpointed.
 
 The improvement check is exactly:
 
@@ -595,9 +633,8 @@ its own callback and simulation state. Results are matched to candidates in
 submission order, not in whichever order workers finish.
 
 By default, the program uses the smaller of 4 and the detected CPU count.
-The commands below explicitly select 10 for the 12-core laptop checked during
-setup. This leaves some CPU capacity for other work; it is not a benchmarked
-claim that 10 is always fastest. Workers beyond the available population have
+The examples below select 4 workers; the appropriate count depends on available
+CPU capacity and measured runtime. Workers beyond the available population have
 no additional candidates to process in that generation.
 
 Multiple seeds run sequentially within one invocation. The worker pool
@@ -627,16 +664,20 @@ the code does not promise identical physics across arbitrary version changes.
 
 ## 11. Saved files, replay and continuation
 
-By default, output is stored beside the assignment, regardless of the folder
-from which Python is launched:
+Output is stored beside the assignment unless `--output-dir` selects another
+parent folder. Each invocation reserves a new numbered directory and preserves
+earlier runs:
 
 ```text
-assignments/assignment_2/__data__/A2_template_2026/
+assignments/assignment_2/
     latest_best.json
-    <batch timestamp>/
+    snake_olympic_arena_9/          # illustrative next number
         model.mjb
         source_snapshot.py
-        convergence.png
+        latest_best.json
+        convergence.png           # each run's best fitness by generation
+        comparison.png            # cross-seed mean with sample SD
+        comparison.csv            # exact values plotted in comparison.png
         summary.json
         ea_seed_42/
             config.json
@@ -644,83 +685,70 @@ assignments/assignment_2/__data__/A2_template_2026/
             history.csv
             best_brain.json
             checkpoint.json
+            fitness.png
+            diversity.png
+            trajectory.png
             trajectory.csv
             result.json
+        random_seed_42/            # when --baseline is requested
 ```
 
-Baseline runs appear in sibling directories such as `random_seed_42`. Additional
-seeds get their own directories. Optional video export adds `best_replay.mp4`
-and `best_replay.png` to the selected winner's run directory; that PNG shows
-the starting scene.
+Additional seeds have their own subfolders. Video export adds `best_replay.mp4`
+and a starting-frame PNG to the chosen winner's directory.
 
-| File | What it is for |
-|---|---|
-| `model.mjb` | The exact compiled physics model shared by this batch |
-| `source_snapshot.py` | The assignment code used to launch the batch |
-| `config.json` | Body, target, architecture, versions, settings, seed and checksums |
-| `evolution.sqlite` | Evaluated individuals, chromosomes, fitness values and lifetimes, including rejected candidates |
-| `history.csv` | One row per recorded generation, describing surviving individuals |
-| `best_brain.json` | Winner's 360 weights, score and compatibility information |
-| `checkpoint.json` | Full surviving population, RNG state, counters and patience state |
-| `trajectory.csv` | Verified winner's time and core X/Y/Z positions; sampled every 50 physics steps, or 0.1 s at the defaults |
-| `result.json` | Final score, success flag, stop reason, budgets, timing and replay-verification status |
-| `summary.json` | All run results in the batch plus mean/spread per algorithm |
-| `convergence.png` | Mean best-so-far fitness across seeds and, for multiple seeds, a sample-standard-deviation band |
-| `latest_best.json` | A pointer to the selected winner of the latest completed batch in that output folder |
+`evolution.sqlite` stores every evaluated chromosome, including rejected candidates.
+`history.csv` describes survivors after selection. `config.json` records settings,
+task/controller versions, source/model hashes and software versions.
+`checkpoint.json` saves the whole surviving population, RNG state, evaluation
+counter and patience state after each completed generation. `best_brain.json`
+stores the selected chromosome, measurements and numerical validity.
+`result.json` separates numerical validity, target success and replay verification.
+`summary.json` reports per-method mean/sample SD, success rate, validity rate and
+failure rate. Failure includes numerical invalidity, falling or failing the
+terrain-clearance check; a valid non-reaching snake need not be a failure.
 
-The latest pointer selects the best run of the requested algorithm in that
-batch, breaking equal-score ties by smaller seed. With `--baseline`, the
-default EA's pointer still selects an EA winner, even if random search did better.
-It is not an all-time leaderboard across every batch.
-
-JSON snapshots are written to a temporary file and then replaced atomically.
-This reduces the risk of leaving a half-written JSON checkpoint after an
-interruption. The last completed generation is the recovery point; unfinished
-work in the next generation may need to be repeated.
+JSON snapshots are replaced atomically. Recovery starts from the last complete
+checkpoint; unfinished evaluations may be repeated. `latest_best.json` selects
+the winner of the latest completed invocation, restricted to the requested
+algorithm, with ties resolved by the smaller seed. It is not an all-time leaderboard.
 
 ### Replay
 
-Replay loads a saved brain and its archived physics model, checks the model
-checksum and controller compatibility, and verifies the saved distance in a
-headless trial before displaying the animation. The interactive viewer repeats
-the trial until its window is closed. It does not perform evolution.
+Replay checks the archived model checksum, restores its target and duration,
+and verifies the saved score and validity before opening the viewer. Keep the
+entire batch folder with a brain. A moved archive can be selected by explicit
+brain or batch-folder path; old absolute latest pointers may need an explicit path.
 
-Keep the surrounding batch folder when sharing a brain: its JSON relies on
-the `model.mjb` in the parent batch directory. For moved archives, use an explicit
-brain path because existing pointer files contain absolute paths.
+Schema-3 brains from older objectives may be replayed diagnostically: their
+stored score is labelled obsolete and the current score is printed. The archive
+is not rewritten. Schema-1/2 brains use incompatible network inputs and are rejected.
 
 ### Resume
 
-Resume restores the **whole surviving population**, not just the best brain.
-With a current checkpoint, it also restores the RNG and stopping-rule state.
-Adaptive mutation sigmas are saved in individual tags and restored with the
-population, so splitting a run does not reset its learned mutation strengths.
-Explicitly changing the initial mutation sigma, switching into adaptive mode,
-or editing its sigma bounds/tau resets those strategy tags to the requested
-initial sigma and begins a new patience window. The saved neural weights and
-their existing fitness values are retained.
+Resume restores the **whole population**, not just the winner. Current
+checkpoints restore the RNG and patience state. Keeping compatible settings
+reproduces an uninterrupted run, including adaptive mutation-sigma tags.
+Every continuation writes a new batch, preserving the source archive.
 
-Population size, task, architecture, duration and supported software versions
-must remain compatible. Existing operator settings are inherited unless an
-explicit command-line option overrides them. The source seed is retained.
+The fitness settings must match exactly: older planar objectives require fresh
+training rather than reuse of incomparable scores. Body, network, population
+size, duration and supported software versions must also match. The archived
+physics and target define the continued task even if today's defaults changed.
 
-Changing search mode, mutation rate, mutation sigma, crossover rate or tournament
-size starts a new patience window. Otherwise, the existing patience state is
-kept. Resuming a run that already plateaued with the same patience does not
-automatically grant a fresh full patience window. Use a larger patience, or
-`--patience 0` for a fixed additional budget, if that is the intended experiment.
+Search settings are inherited unless explicitly overridden. Changing search mode,
+mutation rate/sigma, crossover or tournament size resets patience. Switching into
+adaptive mode or explicitly changing its sigma configuration resets strategy
+tags while retaining the neural weights. Unchanged resumes retain patience;
+use a larger patience or `--patience 0` if more search after a plateau is intended.
 
-Each continuation writes a new batch. Its SQLite archive contains inherited
-survivors plus newly evaluated candidates; earlier rejected candidates remain
-in the source archive. `evaluations` is cumulative, while `new_evaluations`
-counts only the additional work.
+`--generations` is an additional budget on resume. `evaluations` is cumulative;
+`new_evaluations` excludes inherited work. Continuation is not an independent
+replicate. Its SQLite file contains inherited survivors plus new evaluations;
+earlier rejected candidates remain in the source archive.
 
-Legacy archives without an RNG checkpoint may support a population warm start,
-but cannot reproduce the exact original random sequence. Old schema-1/2 brains
-with the previous controller inputs are rejected by the current implementation.
-
-`__data__` is ignored by Git. Include the relevant result folders separately
-when sharing evidence or preparing the assignment submission.
+Legacy archives without saved RNG state can supply a seeded population warm
+start when otherwise compatible, but cannot reproduce the original random
+sequence. The program labels that distinction explicitly.
 
 ## 12. Commands to run the program
 
@@ -736,7 +764,7 @@ Neither uv option is a setting of the evolutionary algorithm.
 ### Start fresh training
 
 ```powershell
-uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --workers 10
+uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --workers 4
 ```
 
 This uses the updated defaults of at most 150 generations and patience 30. It
@@ -759,8 +787,10 @@ brain, replacing the quoted placeholder with its actual file path.
 
 ### Continue the latest completed population
 
+This requires matching current fitness settings. Older objectives need fresh training.
+
 ```powershell
-uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --resume --workers 10 --generations 100 --patience 0
+uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --resume --workers 4 --generations 100 --patience 0
 ```
 
 Here `100` means **100 additional generations**. Plateau stopping is explicitly
@@ -771,7 +801,7 @@ relying on the latest completed-batch pointer.
 ### Run five seeds and a matched random-search baseline
 
 ```powershell
-uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --workers 10 --seeds 42 43 44 45 46 --generations 60 --patience 0 --baseline --no-view
+uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --workers 4 --seeds 42 43 44 45 46 --generations 60 --patience 0 --baseline --no-view
 ```
 
 This uses the same fixed maximum budget for each seed. It runs an EA and a
@@ -794,13 +824,13 @@ path to select results from a custom folder.
 
 ```powershell
 uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --help
-uv run --cache-dir .uv-cache --locked python -m unittest discover -s assignments/assignment_2 -p test_A2_2026.py -v
+uv run --cache-dir .uv-cache --locked python -m unittest discover -s assignments/assignment_2 -p 'test*_A2_2026.py' -v
 ```
 
 The tests cover controller dimensions/actions, heading, fitness, reset behaviour,
 invalid simulations, variation, survival, archive counts, baseline pairing,
 exact continuation for all four modes, reproducible terrain, inherited adaptive
-sigmas and archived-world replay.
+sigmas, archived-world replay, failed-run handling and cross-seed statistics.
 
 ### Main built-in defaults
 
@@ -836,6 +866,7 @@ resume settings are applied.
 |---|---:|---|
 | `--population` | 32 | Survivors retained and children generated each generation |
 | `--generations` | 150 | Maximum offspring generations; additional generations on resume |
+| `--max-minutes` | None | Total training time budget across seeds; stops at a generation boundary |
 | `--seeds` | 42 | Seed or list of independent fresh-run seeds |
 | `--duration` | 15.0 | Simulated seconds per trial |
 | `--workers` | `min(4, detected CPU count)` | Concurrent evaluation processes |
@@ -848,118 +879,94 @@ resume settings are applied.
 | `--min-improvement` | 0.0001 | Threshold in metres for resetting patience |
 | `--target-radius` | 0.1 | Maximum final distance labelled successful |
 | `--algorithm` | `ea` | Evolutionary algorithm; `random` selects standalone random search |
+| `--parameter-file` | None | Load validated tuner settings for a fresh run; explicit flags override |
 
 ## 13. Reading the output
 
-A log line reports a completed generation, for example:
+A log line describes a completed generation:
 
 ```text
-ea seed=42 generation=144 evaluations=4640 best=0.34777m mean=0.37343m
+ea seed=42 generation=  2 evaluations=   12 best_fitness=6.07970 mean_fitness=6.08037 best_3d=6.07970 m valid=100% fallen=0%
 ```
 
-`best`, `mean` and the CSV's `worst` describe the **surviving population after
-selection**. They do not describe every child or every attempted candidate.
-The SQLite archive is available when you need the rejected candidates too.
+This particular line comes from the 2 October 2026 smoke run: population 4,
+two offspring generations, and **0.1-second trials**. It verifies the pipeline,
+not locomotion over the normal 15-second task.
 
-`history.csv` also contains:
+`best`, `mean`, `worst`, `fitness_std` and status fractions in `history.csv`
+describe the surviving population after selection. They do not describe all
+attempted children. The SQLite archive contains rejected candidates too.
 
-- `mean_gene_std`: calculate the standard deviation across survivors for each
-  gene, then average those deviations. A small value means the surviving
-  chromosomes are numerically similar.
-- `unique_genotypes`: the number of distinct chromosome vectors among survivors.
-- `mean_mutation_sigma` (adaptive mode): the average inherited mutation strength
-  among survivors, using the configured initial sigma for untagged initial parents.
+Additional measurements include:
 
-These are diversity diagnostics. They neither change the fitness function nor
-prove that different chromosomes produce different useful gaits.
+- `valid_fraction`: fraction of numerically valid survivors. Valid does not mean successful.
+- `fallen_fraction` and `on_terrain_fraction`: physical task diagnostics.
+- `target_fraction`: fraction meeting the complete final success test.
+- `best_distance_3d` and `best_core_height`: measured geometry, separate from penalties.
+- `mean_gene_std`: mean per-weight SD across survivor chromosomes.
+- `unique_genotypes`: exact distinct chromosome count.
+- `mean_mutation_sigma`: inherited mutation strength, in adaptive EA runs.
 
-The convergence plot's line is the mean of each seed's best-so-far score. Its
-band is plus/minus one **sample standard deviation**, not a confidence interval.
-It differs from the single-generation population mean in the log. If runs stop
-at different generations, each algorithm's curve uses their common recorded
-budgets rather than inventing later values for shorter runs. A second axis shows
-generations when all runs share the same budget-to-generation relationship.
+Numerically different chromosomes need not produce different useful gaits.
+These diversity statistics diagnose the population; they add no fitness bonus.
 
-### A real saved-run example
+`convergence.png` and each seed's `fitness.png` retain individual best-fitness
+curves. `comparison.png` is separate: it plots **the mean of each independent
+run's best fitness**, with a band of plus/minus one **sample SD** (`ddof=1`).
+This is neither the within-population mean nor a confidence interval.
 
-The historical flat-world run `20260922_163336_768668/ea_seed_42`, recorded on
-22 September 2026, used population 32, standard search, at most 150 generations
-and patience 30. It is a different task from the current OlympicArena.
-Its saved files report:
+The comparison uses only evaluation budgets observed in every included run.
+If a seed stopped early, later generations are omitted from the aggregate;
+they remain visible in individual curves. The cohort stays fixed, so the mean
+does not improve merely because weaker runs drop out. With one seed, SD is
+undefined and no band is shown. `comparison.csv` exposes generation, budget,
+sample size, mean and sample SD for every plotted point. All methods in this
+generation plot must have matching budget-to-generation relationships.
 
-| Recorded value | Interpretation |
+### A verified current-objective archive
+
+On 2 October 2026, a headless replay of
+`snake_olympic_arena_4/ea_seed_42/best_brain.json` reproduced:
+
+| Value | Interpretation |
 |---|---|
-| Fitness `0.3477662521` | About 34.8 cm from the target at the end of the 15-second trial |
-| Generation `144` | 144 offspring generations after generation 0 |
-| Evaluations `4640` | `32 * (144 + 1)` candidate trials |
-| Last significant improvement `114` | The patience reference was last updated at generation 114 |
-| Stop reason `fitness plateau` | `144 - 114 = 30` generations since that improvement |
-| `reached_target: false` | 0.3478 m is outside the configured 0.10 m success radius |
-| `replay_verified: true` | The training pipeline reloaded and reproduced the saved winner's score |
+| Fitness / 3D gap `4.9735378425` | No failure penalty; approximately 4.97 m from the final-platform target |
+| Generation `87` | 87 offspring generations after generation 0 |
+| Evaluations `5632` | Population 64: `64 * (87 + 1)` |
+| Duration `15.0` s | Full evaluation duration |
+| `valid: true`, `fallen: false`, `on_terrain: true` | Numerically valid, terrain-supported final pose |
+| `reached_target: false` | Outside the 0.10 m success radius |
 
-This is a dated example from the saved `result.json` and `checkpoint.json`, not
-a prediction for another seed or a claim that it will remain the latest run.
-Reducing the initial 2 m gap is progress, but this particular result has not
-met the chosen success threshold. A smaller remaining gap also does not tell
-us the total distance travelled along the robot's path.
+This is a dated, verified archive example. It is not a claim that it is the
+best controller in every folder, nor evidence that the current task is solved.
+Historical planar-distance pilots are documented separately in
+`REFINEMENT_RESULTS.md`; do not mix their scores with this objective.
 
-### OlympicArena checks on 29 September 2026
+### Implementation review on 2 October 2026
 
-The user's run `20260929_144639_950724/ea_seed_42` stopped at generation 46 after
-1,504 evaluations, with **1.373409 m** remaining. Its last best improvement was
-generation 31, but the surviving population's mean was still improving when
-the old 15-generation patience expired.
+The review checked the visible assignment requirements, selection direction,
+offspring freshness, fixed terrain, neural dimensions/actions, reset behaviour,
+scoring, baseline budgets and saved-state recovery. The following gaps were fixed:
 
-Two continuations started with that exact population and NumPy RNG state on
-the same archived arena. Each received **40 additional generations / 1,280 new
-evaluations**, population 32, no plateau stopping, and the full 15-second trial.
+- A fully invalid population previously raised a replay-mismatch exception even
+  when its saved failure score reproduced exactly. Verification now compares
+  score **and validity**, and produces a useful failed-run result.
+- Non-finite status values could break strict JSON saving. Unavailable values
+  are represented as `null` and cannot count as target success.
+- Tuner failure rates now include numerical failure, even if the last recorded
+  pose still passes the terrain-clearance check. Distance summaries use valid
+  trials only; penalised fitness averages keep every trial.
+- The required mean/spread across independent runs is now available in the
+  separate `comparison.png` and `comparison.csv` outputs.
 
-| Continuation | Final distance (m) | Improvement from the shared starting score |
-|---|---:|---:|
-| Standard | **0.966256** | 0.407153 m (29.6%) |
-| Adaptive | 1.313951 | 0.059459 m (4.3%) |
+The fitness version, controller schema and default training parameters are unchanged.
 
-The standard continuation demonstrates that more training helped this run.
-It is not evidence that a new search operator improved it, and it still misses
-the 0.10 m success threshold. The original arena was generated before terrain
-seeding was fixed; its archived model, not the old `terrain_seed` metadata
-field, identifies the ground used in this comparison.
-
-A separate fresh-run pilot used the newly seeded OlympicArena, seeds 42-46,
-population 12 and 20 offspring generations: **252 evaluations per seed and
-method**. Within each seed, both methods used identical initial chromosomes,
-initial fitness values, model checksums and budgets. Saved winners were
-reloaded and their distances reproduced.
-
-| Fresh search | Mean distance (m) | Sample SD (m) | Target successes |
-|---|---:|---:|---:|
-| Standard | 1.539774 | 0.164874 | 0/5 |
-| Adaptive | 1.531252 | 0.076770 | 0/5 |
-
-Adaptive won two of five paired seeds. Its small mean advantage in this short
-pilot, alongside the worse continuation, does not establish that it is a
-better default. These pilot budgets are also much smaller than the updated
-4,832-evaluation maximum. The seeded fresh arena differs from the old archived
-arena, so compare methods **within** each study, not scores between studies.
-Neither study is a completed final-budget comparison against random search.
-
-Evidence is stored under `__data__/movement_review_20260929/`:
-
-- [Paired metrics and verification checks](__data__/movement_review_20260929/summary.json)
-- [Movement and distance comparison](__data__/movement_review_20260929/movement_comparison.png)
-- [Five-seed convergence](__data__/movement_review_20260929/fresh_convergence.png)
-- [Improved standard replay video](__data__/movement_review_20260929/continuation/standard_seed_42/best_replay.mp4)
-
-These experiments have separate output folders and do not replace the normal
-`latest_best.json` pointer. To replay the improved saved controller:
-
-```powershell
-uv run --cache-dir .uv-cache --locked python assignments/assignment_2/A2_template_2026.py --replay assignments/assignment_2/__data__/movement_review_20260929/continuation/standard_seed_42/best_brain.json
-```
-
-The final implementation checks cover all four modes, including exact adaptive
-resume and deliberate sigma resets. The experimental data is ignored by Git;
-include it separately if sharing the measured results.
+Validation passed all 42 controller/tuner regression tests. A five-seed,
+two-worker smoke run completed 120 search evaluations (12 per seed per method),
+with matching EA/random initial populations and budgets. Every saved winner was
+replayed, and the comparison CSV was checked against a fresh calculation from
+the individual histories. The short 0.1-second trials establish execution and
+accounting, rather than target-reaching performance.
 
 ## 14. Designing a fair experiment
 
@@ -1005,7 +1012,8 @@ this fresh-run baseline option, because it already contains inherited search wor
 - State whether a run stopped on a plateau or exhausted its generation cap.
   A short pilot need not be a converged result.
 
-The earlier [review](REVIEW.md) documents small pilot comparisons. Those results
+The historical [refinement pilot](REFINEMENT_RESULTS.md) documents small comparisons on older
+versions of the task. Those results
 are evidence for those particular budgets, seeds and versions, not a guarantee
 that one mode always wins. New experiments should keep their own configs and
 results rather than treating the README as a live results database.
@@ -1021,7 +1029,8 @@ All functions below are in [A2_template_2026.py](A2_template_2026.py).
 | `_controller_inputs()` / `_heading_features()` | Build the state, target and timing features |
 | `nn_controller()` | Perform the network forward pass and produce desired hinge angles |
 | `_decode()` | Turn one flat chromosome into the two weight matrices |
-| `fitness_function()` | Calculate final XY distance |
+| `fitness_function()` / `_score_state()` | Calculate 3D distance and add physical-failure penalties |
+| `_task_status()` / `_reached_target()` | Measure terrain support and evaluate final success |
 | `_simulate()` | Reset and evaluate one controller consistently |
 | `_worker_init()` / `_worker_evaluate()` | Reuse a model in each evaluation process and score candidates |
 | `_evaluate_population()` | Evaluate individuals whose fitness has not yet been assigned |
@@ -1031,7 +1040,8 @@ All functions below are in [A2_template_2026.py](A2_template_2026.py).
 | `_record_generation()` / `_save_checkpoint()` | Save statistics, the best brain and continuation state |
 | `_load_brain()` / `_archived_model()` | Validate a saved brain and load its original physics |
 | `_continuation_state()` | Read a current checkpoint or recover a legacy population |
-| `_plot_histories()` | Plot cross-seed convergence statistics |
+| `_plot_histories()` | Plot individual best-fitness curves |
+| `_aggregate_histories()` / `_plot_comparison()` | Calculate and plot mean/sample SD at common observed budgets |
 | `_interactive_replay()` / `_export_video()` | Show or save the winning behaviour |
 | `_cli()` | Parse options and orchestrate fresh runs, baselines, continuation and replay |
 
@@ -1051,8 +1061,8 @@ say "YOUR JOB". They are retained as historical template guidance. The actual
 
 ## 16. What the results do and do not establish
 
-A lower fitness demonstrates that a brain finished closer to this target in
-this fixed simulation. Reproducing a saved score confirms that the archived
+A lower fitness is a better outcome under this fixed scoring rule. When both
+trials avoid physical-failure penalties, it also means a smaller final 3D gap. Reproducing a saved score confirms that the archived
 controller can be evaluated consistently in the supported setup.
 
 It does not by itself establish that the robot:

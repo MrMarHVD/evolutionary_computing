@@ -1,0 +1,98 @@
+{
+  "status": "complete",
+  "smoke": false,
+  "paired_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "planned_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "evaluations_per_run": 6432,
+  "completed_runs": 25,
+  "planned_runs": 25,
+  "statistics": {
+    "gaussian_p0.1_s0.05": {
+      "n": 5,
+      "mean": 5.236234557721402,
+      "sample_std": 0.14684355409636402,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.7078364212684534,
+        -0.27115750456958665,
+        -0.22290511812064295,
+        -0.2325381089146843,
+        -0.36918743641314933
+      ],
+      "mean_difference_from_random": -0.3607249178573033
+    },
+    "gaussian_p0.1_s0.15": {
+      "n": 5,
+      "mean": 5.138970127823656,
+      "sample_std": 0.13997921963371374,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.7492974862213506,
+        -0.34129269136756424,
+        -0.3189994510814227,
+        -0.3112056325805561,
+        -0.5691514775243531
+      ],
+      "mean_difference_from_random": -0.45798934775504935
+    },
+    "gaussian_p0.1_s0.45": {
+      "n": 5,
+      "mean": 5.020299434427904,
+      "sample_std": 0.028463429744471466,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.6454127433203753,
+        -0.5742305777565653,
+        -0.5809747774869916,
+        -0.5093980789853179,
+        -0.5732840282047578
+      ],
+      "mean_difference_from_random": -0.5766600411508016
+    },
+    "uniform_reset_p0.1": {
+      "n": 5,
+      "mean": 5.34505888611369,
+      "sample_std": 0.038930300711331474,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.372077051551833,
+        -0.20368412294903937,
+        -0.2471931269854597,
+        -0.14682803087416385,
+        -0.2897206149645788
+      ],
+      "mean_difference_from_random": -0.2519005894650149
+    },
+    "random_search": {
+      "n": 5,
+      "mean": 5.596959475578705,
+      "sample_std": 0.05650972431199357,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mean_difference_from_random": 0.0
+    }
+  }
+}

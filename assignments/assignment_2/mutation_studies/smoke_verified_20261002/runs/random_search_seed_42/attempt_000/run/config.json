@@ -1,0 +1,98 @@
+{
+  "schema": 3,
+  "body": "john_set.snake",
+  "world": "Olympic_Arena",
+  "terrain_seed": 2026,
+  "terrain_generation": "seeded_perlin",
+  "spawn": [
+    0.0,
+    0.0,
+    0.1
+  ],
+  "rotation_degrees": [
+    0,
+    0,
+    180
+  ],
+  "target": [
+    6.069999999999999,
+    0.0,
+    0.505
+  ],
+  "duration": 0.2,
+  "hidden_size": 8,
+  "input_size": 36,
+  "output_size": 8,
+  "controller": "tanh MLP with biases, state/target/clock/elapsed time/heading sine+cosine",
+  "controller_settings": {
+    "clock_frequencies": [
+      0.75,
+      1.5
+    ],
+    "position_input_scale": 3.141592653589793,
+    "velocity_input_scale": 5.0,
+    "target_input_scale": 2.0,
+    "forward_x_sign": -1.0,
+    "action_angle_limit": 1.5707963267948966
+  },
+  "variation_settings": {
+    "initial_weight_sigma": 0.5,
+    "weight_limit": 5.0,
+    "crossover_gene_probability": 0.5,
+    "mutation_scales": [
+      0.2,
+      1.0,
+      3.0
+    ],
+    "mutation_scale_probabilities": [
+      0.6,
+      0.3,
+      0.1
+    ],
+    "fine_mutation_threshold": 1.0,
+    "adaptive_sigma_min": 0.002,
+    "adaptive_sigma_max": 0.5,
+    "adaptive_sigma_tau": 0.7
+  },
+  "control": "direct angle commands every physics step",
+  "fitness": "3D core-to-target-surface distance plus fall/off-terrain penalty, minimised",
+  "fitness_settings": {
+    "version": 2,
+    "distance": "XYZ core to target surface",
+    "fall_height_margin": 0.25,
+    "failure_penalty": 100.0,
+    "max_core_clearance": 0.25,
+    "penetration_tolerance": 0.02,
+    "fall_check_steps": 50,
+    "success_requires_contact": true
+  },
+  "timestep": 0.002,
+  "seed": 42,
+  "mujoco_version": "3.8.0",
+  "numpy_version": "2.3.3",
+  "source_sha256": "0be5a4befce2f8f3c6cff5c9898143ae8861337851d344c5fdf1f03e328ee486",
+  "model_sha256": "d36288ff4336f6ba5eb81272d3f2345079daa9fc3d046467e320d44d2123a03e",
+  "settings": {
+    "population": 4,
+    "generations": 2,
+    "duration": 0.2,
+    "workers": 2,
+    "tournament": 3,
+    "crossover_rate": 0.2,
+    "search_mode": "standard",
+    "algorithm": "random",
+    "mutation_operator": "gaussian",
+    "mutation_rate": 0.0,
+    "mutation_sigma": 0.0,
+    "patience": 0,
+    "min_improvement": 0.0001,
+    "target_radius": 0.1,
+    "resume": null
+  },
+  "continuation": {
+    "source": null,
+    "start_generation": 0,
+    "inherited_evaluations": 0,
+    "restored_rng": false
+  }
+}

@@ -1,0 +1,597 @@
+{
+  "schema": 1,
+  "plan": {
+    "population": 4,
+    "generations": 2,
+    "duration": 0.2,
+    "tournament": 3,
+    "crossover_rate": 0.2,
+    "seeds": [
+      42,
+      43
+    ],
+    "smoke": true,
+    "target_radius": 0.1,
+    "conditions": [
+      {
+        "id": "gaussian_p0.1_s0.05",
+        "algorithm": "ea",
+        "mutation_operator": "gaussian",
+        "mutation_rate": 0.1,
+        "mutation_sigma": 0.05
+      },
+      {
+        "id": "gaussian_p0.1_s0.15",
+        "algorithm": "ea",
+        "mutation_operator": "gaussian",
+        "mutation_rate": 0.1,
+        "mutation_sigma": 0.15
+      },
+      {
+        "id": "uniform_step_p0.1_s0.05",
+        "algorithm": "ea",
+        "mutation_operator": "uniform_step",
+        "mutation_rate": 0.1,
+        "mutation_sigma": 0.05
+      },
+      {
+        "id": "uniform_step_p0.1_s0.15",
+        "algorithm": "ea",
+        "mutation_operator": "uniform_step",
+        "mutation_rate": 0.1,
+        "mutation_sigma": 0.15
+      },
+      {
+        "id": "uniform_reset_p0.1",
+        "algorithm": "ea",
+        "mutation_operator": "uniform_reset",
+        "mutation_rate": 0.1,
+        "mutation_sigma": null
+      },
+      {
+        "id": "random_search",
+        "algorithm": "random",
+        "mutation_operator": "gaussian",
+        "mutation_rate": 0.0,
+        "mutation_sigma": 0.0
+      }
+    ],
+    "search_mode": "standard",
+    "survivor_selection": "elitist mu+lambda, duplicates allowed",
+    "patience": 0,
+    "terrain_seed": 2026
+  },
+  "status": "complete",
+  "target": [
+    6.069999999999999,
+    0.0,
+    0.505
+  ],
+  "trials": {
+    "gaussian_p0.1_s0.05_seed_42": {
+      "condition": "gaussian_p0.1_s0.05",
+      "seed": 42,
+      "attempts": [
+        "runs\\gaussian_p0.1_s0.05_seed_42\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 42,
+        "algorithm": "ea",
+        "fitness": 6.079153329198464,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.091993393333784,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.079153329198464,
+          "distance_xy": 6.063927071696786,
+          "core_height": 0.07500736163556067,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.0750073608905051,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.006074049297295409,
+            -0.003687173912323158,
+            0.07500736163556067
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\gaussian_p0.1_s0.05_seed_42\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.02250352833313324
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "gaussian_p0.1_s0.15_seed_42": {
+      "condition": "gaussian_p0.1_s0.15",
+      "seed": 42,
+      "attempts": [
+        "runs\\gaussian_p0.1_s0.15_seed_42\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 42,
+        "algorithm": "ea",
+        "fitness": 6.079870836131451,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.01574881333265997,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.079870836131451,
+          "distance_xy": 6.064644912251673,
+          "core_height": 0.07498666027477224,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07498665952971667,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.005355985227572511,
+            -0.0032993613139843283,
+            0.07498666027477224
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\gaussian_p0.1_s0.15_seed_42\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.014189238333589553
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "uniform_step_p0.1_s0.05_seed_42": {
+      "condition": "uniform_step_p0.1_s0.05",
+      "seed": 42,
+      "attempts": [
+        "runs\\uniform_step_p0.1_s0.05_seed_42\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 42,
+        "algorithm": "ea",
+        "fitness": 6.0792220253423634,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.02084073333341318,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.0792220253423634,
+          "distance_xy": 6.064001733861201,
+          "core_height": 0.0750890730208631,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07508907227580752,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.005998891064285949,
+            -0.0027530161811176626,
+            0.0750890730208631
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\uniform_step_p0.1_s0.05_seed_42\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.013165139999667492
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "uniform_step_p0.1_s0.15_seed_42": {
+      "condition": "uniform_step_p0.1_s0.15",
+      "seed": 42,
+      "attempts": [
+        "runs\\uniform_step_p0.1_s0.15_seed_42\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 42,
+        "algorithm": "ea",
+        "fitness": 6.078810961409784,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.016803418333195926,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.078810961409784,
+          "distance_xy": 6.063582692560065,
+          "core_height": 0.07499112213609906,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07499112139104348,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.006418080072326539,
+            -0.003061019470977389,
+            0.07499112213609906
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\uniform_step_p0.1_s0.15_seed_42\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.013295276666273519
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "uniform_reset_p0.1_seed_42": {
+      "condition": "uniform_reset_p0.1",
+      "seed": 42,
+      "attempts": [
+        "runs\\uniform_reset_p0.1_seed_42\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 42,
+        "algorithm": "ea",
+        "fitness": 6.0792641892387556,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.0269056050000169,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.0792641892387556,
+          "distance_xy": 6.064044640381302,
+          "core_height": 0.07509805533871379,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07509805459365822,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.005959856759967054,
+            -0.0073852359879464265,
+            0.07509805533871379
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\uniform_reset_p0.1_seed_42\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.015201501667130893
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "random_search_seed_42": {
+      "condition": "random_search",
+      "seed": 42,
+      "attempts": [
+        "runs\\random_search_seed_42\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 42,
+        "algorithm": "random",
+        "fitness": 6.079703836376571,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.02531772499981647,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.079703836376571,
+          "distance_xy": 6.064482929844282,
+          "core_height": 0.07506333992167916,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07506333917662358,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.005518384945197213,
+            -0.003993373885270465,
+            0.07506333992167916
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\random_search_seed_42\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.013692590000088482
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "gaussian_p0.1_s0.05_seed_43": {
+      "condition": "gaussian_p0.1_s0.05",
+      "seed": 43,
+      "attempts": [
+        "runs\\gaussian_p0.1_s0.05_seed_43\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 43,
+        "algorithm": "ea",
+        "fitness": 6.077151183679902,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.017253708333009855,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.077151183679902,
+          "distance_xy": 6.0619364938761295,
+          "core_height": 0.07524140088322193,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07524140013816635,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.008064647158061301,
+            -0.0037193752579086697,
+            0.07524140088322193
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\gaussian_p0.1_s0.05_seed_43\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.01380674500008657
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "gaussian_p0.1_s0.15_seed_43": {
+      "condition": "gaussian_p0.1_s0.15",
+      "seed": 43,
+      "attempts": [
+        "runs\\gaussian_p0.1_s0.15_seed_43\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 43,
+        "algorithm": "ea",
+        "fitness": 6.077151183679902,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.017824539999613382,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.077151183679902,
+          "distance_xy": 6.0619364938761295,
+          "core_height": 0.07524140088322193,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07524140013816635,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.008064647158061301,
+            -0.0037193752579086697,
+            0.07524140088322193
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\gaussian_p0.1_s0.15_seed_43\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.015441690000200955
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "uniform_step_p0.1_s0.05_seed_43": {
+      "condition": "uniform_step_p0.1_s0.05",
+      "seed": 43,
+      "attempts": [
+        "runs\\uniform_step_p0.1_s0.05_seed_43\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 43,
+        "algorithm": "ea",
+        "fitness": 6.076972230662839,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.018358911666534066,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.076972230662839,
+          "distance_xy": 6.061762297315724,
+          "core_height": 0.07531483259382862,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07531483184877305,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.008240062693305914,
+            -0.005348983264423123,
+            0.07531483259382862
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\uniform_step_p0.1_s0.05_seed_43\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.014631778333568945
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "uniform_step_p0.1_s0.15_seed_43": {
+      "condition": "uniform_step_p0.1_s0.15",
+      "seed": 43,
+      "attempts": [
+        "runs\\uniform_step_p0.1_s0.15_seed_43\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 43,
+        "algorithm": "ea",
+        "fitness": 6.077017521189278,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.021117728333047127,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.077017521189278,
+          "distance_xy": 6.061808628245597,
+          "core_height": 0.07532790715627273,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07532790641121716,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.00819256332995502,
+            -0.0038008162965181094,
+            0.07532790715627273
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\uniform_step_p0.1_s0.15_seed_43\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.01442456333412944
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "uniform_reset_p0.1_seed_43": {
+      "condition": "uniform_reset_p0.1",
+      "seed": 43,
+      "attempts": [
+        "runs\\uniform_reset_p0.1_seed_43\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 43,
+        "algorithm": "ea",
+        "fitness": 6.075528065091678,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.016167308333388065,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.075528065091678,
+          "distance_xy": 6.060295800891724,
+          "core_height": 0.07505107813745143,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": false,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07505107739239586,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.00970454420594596,
+            -0.002045186497569033,
+            0.07505107813745143
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\uniform_reset_p0.1_seed_43\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.013068490000053619
+      },
+      "complete": true,
+      "video_status": "saved"
+    },
+    "random_search_seed_43": {
+      "condition": "random_search",
+      "seed": 43,
+      "attempts": [
+        "runs\\random_search_seed_43\\attempt_000\\run"
+      ],
+      "result": {
+        "seed": 43,
+        "algorithm": "random",
+        "fitness": 6.077151183679902,
+        "valid": true,
+        "evaluations": 12,
+        "stop_reason": "generation budget",
+        "new_evaluations": 12,
+        "generation": 2,
+        "training_minutes": 0.017323833332920913,
+        "reached_target": false,
+        "task_status": {
+          "distance_3d": 6.077151183679902,
+          "distance_xy": 6.0619364938761295,
+          "core_height": 0.07524140088322193,
+          "fallen": false,
+          "on_terrain": true,
+          "terrain_contact": true,
+          "terrain_height": 7.450555727928077e-10,
+          "core_clearance": 0.07524140013816635,
+          "terrain_geom": "floor",
+          "elapsed_seconds": 0.20000000000000015,
+          "final_position": [
+            0.008064647158061301,
+            -0.0037193752579086697,
+            0.07524140088322193
+          ],
+          "valid": true
+        },
+        "target_radius": 0.1,
+        "brain": "runs\\random_search_seed_43\\attempt_000\\run\\best_brain.json",
+        "replay_verified": true,
+        "plotting_minutes": 0.014480704999975084
+      },
+      "complete": true,
+      "video_status": "saved"
+    }
+  },
+  "model_sha256": "d36288ff4336f6ba5eb81272d3f2345079daa9fc3d046467e320d44d2123a03e",
+  "source_hashes": {
+    "A2_template_2026.py": "0be5a4befce2f8f3c6cff5c9898143ae8861337851d344c5fdf1f03e328ee486",
+    "mutation_study_A2_2026.py": "ff51fc57f492cbd14217f6f053130fa19f063ea87f425c8191e471429e83008e"
+  },
+  "versions": {
+    "mujoco": "3.8.0",
+    "numpy": "2.3.3"
+  }
+}

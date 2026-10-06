@@ -1,0 +1,89 @@
+{
+  "status": "complete",
+  "smoke": true,
+  "paired_seeds": [
+    42,
+    43
+  ],
+  "planned_seeds": [
+    42,
+    43
+  ],
+  "evaluations_per_run": 12,
+  "completed_runs": 12,
+  "planned_runs": 12,
+  "statistics": {
+    "gaussian_p0.1_s0.05": {
+      "n": 2,
+      "mean": 6.078152256439183,
+      "sample_std": 0.001415730673097238,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.000550507178107118,
+        0.0
+      ],
+      "mean_difference_from_random": -0.000275253589053559
+    },
+    "gaussian_p0.1_s0.15": {
+      "n": 2,
+      "mean": 6.078511009905677,
+      "sample_std": 0.001923084690960707,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        0.00016699975487988183,
+        0.0
+      ],
+      "mean_difference_from_random": 8.349987743994092e-05
+    },
+    "uniform_step_p0.1_s0.05": {
+      "n": 2,
+      "mean": 6.078097128002601,
+      "sample_std": 0.0015908450741693994,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.00048181103420752436,
+        -0.00017895301706349898
+      ],
+      "mean_difference_from_random": -0.00033038202563551167
+    },
+    "uniform_step_p0.1_s0.15": {
+      "n": 2,
+      "mean": 6.077914241299531,
+      "sample_std": 0.0012681537415721628,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.0008928749667873603,
+        -0.00013366249062407576
+      ],
+      "mean_difference_from_random": -0.000513268728705718
+    },
+    "uniform_reset_p0.1": {
+      "n": 2,
+      "mean": 6.077396127165217,
+      "sample_std": 0.002641838719753284,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        -0.0004396471378154132,
+        -0.0016231185882240595
+      ],
+      "mean_difference_from_random": -0.0010313828630197364
+    },
+    "random_search": {
+      "n": 2,
+      "mean": 6.078427510028236,
+      "sample_std": 0.0018049980318286514,
+      "success_rate": 0.0,
+      "failure_rate": 0.0,
+      "paired_difference_from_random": [
+        0.0,
+        0.0
+      ],
+      "mean_difference_from_random": 0.0
+    }
+  }
+}

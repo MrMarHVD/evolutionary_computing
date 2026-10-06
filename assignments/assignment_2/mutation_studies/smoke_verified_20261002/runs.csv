@@ -1,0 +1,13 @@
+condition,seed,fitness,distance_3d,success,valid,fallen,on_terrain,evaluations,included_in_paired_summary,brain
+gaussian_p0.1_s0.05,42,6.079153329198464,6.079153329198464,False,True,False,True,12,True,runs\gaussian_p0.1_s0.05_seed_42\attempt_000\run\best_brain.json
+gaussian_p0.1_s0.15,42,6.079870836131451,6.079870836131451,False,True,False,True,12,True,runs\gaussian_p0.1_s0.15_seed_42\attempt_000\run\best_brain.json
+uniform_step_p0.1_s0.05,42,6.0792220253423634,6.0792220253423634,False,True,False,True,12,True,runs\uniform_step_p0.1_s0.05_seed_42\attempt_000\run\best_brain.json
+uniform_step_p0.1_s0.15,42,6.078810961409784,6.078810961409784,False,True,False,True,12,True,runs\uniform_step_p0.1_s0.15_seed_42\attempt_000\run\best_brain.json
+uniform_reset_p0.1,42,6.0792641892387556,6.0792641892387556,False,True,False,True,12,True,runs\uniform_reset_p0.1_seed_42\attempt_000\run\best_brain.json
+random_search,42,6.079703836376571,6.079703836376571,False,True,False,True,12,True,runs\random_search_seed_42\attempt_000\run\best_brain.json
+gaussian_p0.1_s0.05,43,6.077151183679902,6.077151183679902,False,True,False,True,12,True,runs\gaussian_p0.1_s0.05_seed_43\attempt_000\run\best_brain.json
+gaussian_p0.1_s0.15,43,6.077151183679902,6.077151183679902,False,True,False,True,12,True,runs\gaussian_p0.1_s0.15_seed_43\attempt_000\run\best_brain.json
+uniform_step_p0.1_s0.05,43,6.076972230662839,6.076972230662839,False,True,False,True,12,True,runs\uniform_step_p0.1_s0.05_seed_43\attempt_000\run\best_brain.json
+uniform_step_p0.1_s0.15,43,6.077017521189278,6.077017521189278,False,True,False,True,12,True,runs\uniform_step_p0.1_s0.15_seed_43\attempt_000\run\best_brain.json
+uniform_reset_p0.1,43,6.075528065091678,6.075528065091678,False,True,False,True,12,True,runs\uniform_reset_p0.1_seed_43\attempt_000\run\best_brain.json
+random_search,43,6.077151183679902,6.077151183679902,False,True,False,True,12,True,runs\random_search_seed_43\attempt_000\run\best_brain.json

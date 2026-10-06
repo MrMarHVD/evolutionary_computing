@@ -1,0 +1,34 @@
+{
+  "seed": 42,
+  "algorithm": "ea",
+  "fitness": 4.940530783870655,
+  "valid": true,
+  "evaluations": 6432,
+  "stop_reason": "generation budget",
+  "new_evaluations": 6432,
+  "generation": 200,
+  "training_minutes": 30.387864716666325,
+  "reached_target": false,
+  "task_status": {
+    "distance_3d": 4.940530783870655,
+    "distance_xy": 4.922552238450856,
+    "core_height": 0.08390157196201595,
+    "fallen": false,
+    "on_terrain": true,
+    "terrain_contact": true,
+    "terrain_height": -0.000502990034268791,
+    "core_clearance": 0.08440456199628474,
+    "terrain_geom": "",
+    "elapsed_seconds": 15.000000000001679,
+    "final_position": [
+      1.1474481277186037,
+      -0.001898677553947154,
+      0.08390157196201595
+    ],
+    "valid": true
+  },
+  "target_radius": 0.1,
+  "brain": "D:\\Masters\\EVOLUTIONARY_COMPUTING\\evolutionary_computing\\assignments\\assignment_2\\mutation_studies\\study_20261002_165141\\runs\\gaussian_p0.1_s0.15_seed_42\\attempt_000\\run\\best_brain.json",
+  "replay_verified": true,
+  "plotting_minutes": 0.013945753333488634
+}
