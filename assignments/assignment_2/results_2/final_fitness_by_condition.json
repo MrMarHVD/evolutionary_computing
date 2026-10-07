@@ -1,0 +1,42 @@
+[
+  {
+    "condition": "none",
+    "seeds": 5,
+    "average_final_fitness": 5.629277663612211,
+    "best_final_fitness": 5.623460833316148,
+    "average_final_fitness_std": 0.2066580419418858,
+    "best_final_fitness_std": 0.20906699215963748
+  },
+  {
+    "condition": "local_discrete",
+    "seeds": 5,
+    "average_final_fitness": 5.087090152364354,
+    "best_final_fitness": 5.0617344363019745,
+    "average_final_fitness_std": 0.1760204657352351,
+    "best_final_fitness_std": 0.1770509517506066
+  },
+  {
+    "condition": "local_intermediate",
+    "seeds": 5,
+    "average_final_fitness": 5.461528117831486,
+    "best_final_fitness": 5.458092230452661,
+    "average_final_fitness_std": 0.4864783190092144,
+    "best_final_fitness_std": 0.48779203989842373
+  },
+  {
+    "condition": "global_discrete",
+    "seeds": 5,
+    "average_final_fitness": 5.8376431003261,
+    "best_final_fitness": 5.630848616383578,
+    "average_final_fitness_std": 0.08680424424090528,
+    "best_final_fitness_std": 0.10361552535217504
+  },
+  {
+    "condition": "global_intermediate",
+    "seeds": 5,
+    "average_final_fitness": 5.299945437463276,
+    "best_final_fitness": 5.283197694694471,
+    "average_final_fitness_std": 0.22095001875235976,
+    "best_final_fitness_std": 0.22137713849939333
+  }
+]
