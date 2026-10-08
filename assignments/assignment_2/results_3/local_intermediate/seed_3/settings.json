@@ -1,0 +1,28 @@
+{
+  "seed": 3,
+  "condition": "local_intermediate",
+  "population": 100,
+  "offspring": 20,
+  "generations": 100,
+  "hidden": 6,
+  "duration": 15.0,
+  "mutation_control": "linear",
+  "mutation_std_start": 0.1,
+  "mutation_std_end": 0.01,
+  "mutation_probability": 0.1,
+  "init_std": 0.5,
+  "body": "john_set.gecko",
+  "spawn": [
+    -0.8,
+    0.0,
+    0.1
+  ],
+  "target": [
+    5.42,
+    0.0,
+    0.0
+  ],
+  "genotype_size": 138,
+  "timestep": 0.002,
+  "simulation_steps": 7500
+}

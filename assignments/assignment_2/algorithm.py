@@ -21,9 +21,9 @@ from ariel.simulation.tasks.targeted_locomotion import distance_to_target
 
 # Settings and constants
 HERE = Path(__file__).resolve().parent
-RESULTS_DIR = HERE / "results_2"
-POPULATION_SIZE = 20
-OFFSPRING_SIZE = 20
+RESULTS_DIR = HERE / "results_4"
+POPULATION_SIZE = 100
+OFFSPRING_SIZE = POPULATION_SIZE
 NUM_GENERATIONS = 100
 SEEDS = list(range(5))
 INIT_SD = 0.5
