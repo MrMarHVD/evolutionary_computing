@@ -1,0 +1,57 @@
+[
+  {
+    "mutation_probability": 0.0,
+    "n_seeds": 5,
+    "final_generation": 100,
+    "average_final_fitness": 1.963096790702829,
+    "average_final_fitness_sd_between_seeds": 0.007000521589883704,
+    "best_final_fitness_mean": 1.963096790702829,
+    "best_final_fitness_sd_between_seeds": 0.007000521589883589,
+    "best_final_fitness_median": 1.96407197579725,
+    "best_final_fitness_min_across_seeds": 1.9512413892740101
+  },
+  {
+    "mutation_probability": 0.25,
+    "n_seeds": 5,
+    "final_generation": 100,
+    "average_final_fitness": 1.8684628258262403,
+    "average_final_fitness_sd_between_seeds": 0.03707403304662347,
+    "best_final_fitness_mean": 1.8379156047716716,
+    "best_final_fitness_sd_between_seeds": 0.03876901592693733,
+    "best_final_fitness_median": 1.8267530947366526,
+    "best_final_fitness_min_across_seeds": 1.804392579238185
+  },
+  {
+    "mutation_probability": 0.5,
+    "n_seeds": 5,
+    "final_generation": 100,
+    "average_final_fitness": 1.8775618306393007,
+    "average_final_fitness_sd_between_seeds": 0.01966532208973829,
+    "best_final_fitness_mean": 1.8491241959193858,
+    "best_final_fitness_sd_between_seeds": 0.02484137695874566,
+    "best_final_fitness_median": 1.8488595401197128,
+    "best_final_fitness_min_across_seeds": 1.8136618105800326
+  },
+  {
+    "mutation_probability": 0.75,
+    "n_seeds": 5,
+    "final_generation": 100,
+    "average_final_fitness": 1.894672489211689,
+    "average_final_fitness_sd_between_seeds": 0.014466661135098719,
+    "best_final_fitness_mean": 1.8625375395207668,
+    "best_final_fitness_sd_between_seeds": 0.008258783628645815,
+    "best_final_fitness_median": 1.8652022594297462,
+    "best_final_fitness_min_across_seeds": 1.8479761062081193
+  },
+  {
+    "mutation_probability": 1.0,
+    "n_seeds": 5,
+    "final_generation": 100,
+    "average_final_fitness": 1.9022449556406298,
+    "average_final_fitness_sd_between_seeds": 0.05041181944321333,
+    "best_final_fitness_mean": 1.8691283871581157,
+    "best_final_fitness_sd_between_seeds": 0.05532175818658617,
+    "best_final_fitness_median": 1.8431820568635822,
+    "best_final_fitness_min_across_seeds": 1.8151786077717162
+  }
+]

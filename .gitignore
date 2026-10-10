@@ -2,7 +2,6 @@
 # Videos
 *.mp4
 # Dirs
-__data__
 # Mujoco
 MUJOCO_LOG.TXT
 # DrawIo
@@ -274,3 +273,5 @@ RECYCLE.BIN/
 *.msp
 # Windows shortcuts
 *.lnk
+
+assignments/assignment_1/result*
